@@ -8,6 +8,8 @@ A lightweight controller for cloud server monitoring, traffic control, quota pro
 > **阿里云 流量监控与自动化管理终极解决方案**
 > 
 > 集成流量实时监控、自动熔断保护、抢占式实例保活、**实例规格与价格透明展示**于一体。
+> 
+> 本项目基于 [Kori1c/ecs-controller](https://github.com/Kori1c/ecs-controller) 重写，并参考了 [CDT-Monitor](https://github.com/wang4386/CDT-Monitor) 的流量监控逻辑。
 
 ## ⚠️ 免责声明
 
