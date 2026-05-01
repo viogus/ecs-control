@@ -477,9 +477,6 @@ class AliyunTrafficCheck
         // 普通/重要日志保留 30 天，高频心跳日志仅保留 3 天
         $this->db->pruneLogs(30, 3);
 
-        // 关键改动：每次清理后重排 ID，保证 ID 永远紧凑
-        $this->db->reorderLogsIds();
-
         $this->db->pruneStats();
 
         // 优化：每天凌晨 04:xx 执行一次 VACUUM 整理数据库碎片
@@ -1509,12 +1506,12 @@ class AliyunTrafficCheck
         // CDT 返回的是 per-AK 月度总流量，同一 group 下所有实例共享 AK 和流量值。
         // 取第一条记录的 traffic_used，不 SUM。
         if ($groupKey !== '') {
-            $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE group_key = ? AND traffic_billing_month = ? LIMIT 1");
+            $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE group_key = ? AND traffic_billing_month = ? ORDER BY id ASC LIMIT 1");
             $stmt->execute([$groupKey, $billingMonth]);
             return (float) $stmt->fetchColumn();
         }
 
-        $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE access_key_id = ? AND region_id = ? AND traffic_billing_month = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE access_key_id = ? AND region_id = ? AND traffic_billing_month = ? ORDER BY id ASC LIMIT 1");
         $stmt->execute([$account['access_key_id'] ?? '', $account['region_id'] ?? '', $billingMonth]);
         return (float) $stmt->fetchColumn();
     }

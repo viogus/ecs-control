@@ -2686,7 +2686,7 @@
                                     </div>
                                     <div>
                                         <label class="mb-2 block text-sm font-semibold text-[#6f7787]">管理员密码</label>
-                                        <input v-model="config.admin_password" type="text" class="glass-input">
+                                        <input v-model="config.admin_password" type="password" class="glass-input">
                                     </div>
                                     <div class="two-col-grid">
                                         <div>
@@ -3828,6 +3828,9 @@
                 const showLoginModal = ref(false);
                 const passwordInput = ref('');
                 const criticalError = ref(null);
+                const csrfToken = ref('');
+
+                const csrfHeaders = () => ({ 'X-CSRF-Token': csrfToken.value });
                 const isAdmin = ref(false);
                 const cronWarning = ref(false);
                 const currentMenu = ref('status');
@@ -4267,6 +4270,9 @@
                     try {
                         const res = await fetch('index.php?action=get_config');
                         const data = await res.json();
+                        if (data.csrf_token) {
+                            csrfToken.value = data.csrf_token;
+                        }
                         config.value = normalizeConfig(data);
                         markConfigClean();
                     } catch (error) {
@@ -4354,6 +4360,7 @@
                     try {
                         const res = await fetch('index.php?action=clear_logs', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ tab: currentLogTab.value })
                         });
                         const data = await res.json();
@@ -4436,6 +4443,7 @@
                     try {
                         const res = await fetch('index.php?action=save_config', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify(config.value)
                         });
                         const data = await res.json();
@@ -4476,6 +4484,7 @@
                     try {
                         const res = await fetch('index.php?action=upload_logo', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: formData
                         });
                         const data = await res.json();
@@ -4504,6 +4513,7 @@
                     try {
                         const res = await fetch('index.php?action=refresh_account', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ id })
                         });
                         const data = await res.json();
@@ -4575,6 +4585,7 @@
                     try {
                         const res = await fetch('index.php?action=control_instance', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ accountId, action, shutdownMode: config.value.shutdown_mode || 'KeepCharging' })
                         });
                         const data = await res.json();
@@ -4605,6 +4616,7 @@
                     try {
                         const res = await fetch('index.php?action=replace_instance_ip', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ accountId })
                         });
                         const data = await res.json();
@@ -4643,6 +4655,7 @@
                     try {
                         const res = await fetch('index.php?action=delete_instance', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ accountId, forceStop: true })
                         });
                         const data = await res.json();
@@ -4684,6 +4697,7 @@
                     try {
                         const res = await fetch('index.php?action=sync_account_group', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ groupKey: account.groupKey })
                         });
                         const data = await res.json();
@@ -4742,6 +4756,7 @@
                     try {
                         const res = await fetch('index.php?action=restore_schedule_block', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ groupKey: account.groupKey })
                         });
                         const data = await res.json();
@@ -4859,7 +4874,7 @@
                     try {
                         const res = await fetch('index.php?action=test_account', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { ...csrfHeaders(), 'Content-Type': 'application/json' },
                             body: JSON.stringify({ account: accountDraft.value })
                         });
                         const data = await res.json();
@@ -4944,6 +4959,7 @@
                     try {
                         const res = await fetch('index.php?action=get_ecs_disk_options', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({
                                 accountGroupKey: ecsCreateDraft.value.accountGroupKey,
                                 regionId: ecsCreateDraft.value.regionId,
@@ -5018,6 +5034,7 @@
                     try {
                         const res = await fetch('index.php?action=preview_ecs_create', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify(ecsCreateDraft.value)
                         });
                         const data = await res.json();
@@ -5041,6 +5058,7 @@
                     try {
                         const res = await fetch('index.php?action=create_ecs', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({
                                 previewId: ecsCreatePreview.value.previewId,
                                 confirmed: true
@@ -5091,6 +5109,7 @@
                     try {
                         const res = await fetch('index.php?action=send_test_email', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ email: config.value.Notification.email })
                         });
                         const data = await res.json();
@@ -5108,6 +5127,7 @@
                     try {
                         const res = await fetch('index.php?action=send_test_telegram', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ telegram: config.value.Notification.telegram })
                         });
                         const data = await res.json();
@@ -5125,6 +5145,7 @@
                     try {
                         const res = await fetch('index.php?action=send_test_webhook', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ webhook: config.value.Notification.webhook })
                         });
                         const data = await res.json();
@@ -5141,6 +5162,7 @@
                     try {
                         const res = await fetch('index.php?action=login', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({ password: passwordInput.value })
                         });
                         const data = await res.json();
@@ -5151,6 +5173,7 @@
                         passwordInput.value = '';
                         showLoginModal.value = false;
                         isAdmin.value = true;
+                        csrfToken.value = data.csrf_token || '';
                         await fetchConfig();
                         await fetchAllInstances(false);
                     } catch (error) {
@@ -5179,6 +5202,7 @@
                     try {
                         const res = await fetch('index.php?action=setup', {
                             method: 'POST',
+                            headers: csrfHeaders(),
                             body: JSON.stringify({
                                 ...createDefaultConfig(),
                                 ...setupData.value
@@ -5202,6 +5226,7 @@
                         const res = await fetch('index.php?action=check_login');
                         const data = await res.json();
                         isAdmin.value = !!data.logged_in;
+                        csrfToken.value = data.csrf_token || '';
                         if (isAdmin.value) {
                             await fetchConfig();
                         }
@@ -5355,6 +5380,7 @@
                     brandLogoUrl,
                     cronWarning,
                     criticalError,
+                    csrfToken,
                     currentLogTab,
                     currentMenu,
                     currentNotifyTab,

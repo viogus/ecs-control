@@ -6,7 +6,7 @@ ini_set('session.use_strict_mode', 1);
 ini_set('session.use_only_cookies', 1);
 session_start();
 
-error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING & ~E_DEPRECATED);
+error_reporting(E_ALL & ~E_NOTICE & ~E_DEPRECATED);
 ini_set('display_errors', 0);
 
 require_once 'AliyunTrafficCheck.php';
@@ -15,6 +15,23 @@ header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 
 $app = new AliyunTrafficCheck();
 $action = $_GET['action'] ?? 'view';
+
+// CSRF token helpers
+function ensure_csrf_token() {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+}
+
+function require_csrf() {
+    ensure_csrf_token();
+    $header = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    if (empty($header) || !hash_equals($_SESSION['csrf_token'], $header)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'CSRF 验证失败，请刷新页面后重试']);
+        exit;
+    }
+}
 
 // ---------------- 公开接口 ----------------
 
@@ -39,11 +56,12 @@ if ($action === 'setup') {
         echo json_encode(['success' => false, 'message' => '系统已完成初始化']);
         exit;
     }
-    
+
     $data = json_decode(file_get_contents('php://input'), true);
     try {
         if ($app->setup($data)) {
             $_SESSION['is_admin'] = true;
+            ensure_csrf_token();
             echo json_encode(['success' => true]);
         } else {
             echo json_encode(['success' => false, 'message' => '初始化失败']);
@@ -61,7 +79,8 @@ if ($action === 'login') {
         if ($app->login($data['password'] ?? '')) {
             session_regenerate_id(true);
             $_SESSION['is_admin'] = true;
-            echo json_encode(['success' => true]);
+            ensure_csrf_token();
+            echo json_encode(['success' => true, 'csrf_token' => $_SESSION['csrf_token']]);
         } else {
             echo json_encode(['success' => false, 'message' => '密码错误']);
         }
@@ -73,7 +92,13 @@ if ($action === 'login') {
 
 if ($action === 'check_login') {
     header('Content-Type: application/json');
-    echo json_encode(['logged_in' => isset($_SESSION['is_admin']) && $_SESSION['is_admin'] === true]);
+    $isLoggedIn = isset($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
+    $response = ['logged_in' => $isLoggedIn];
+    if ($isLoggedIn) {
+        ensure_csrf_token();
+        $response['csrf_token'] = $_SESSION['csrf_token'];
+    }
+    echo json_encode($response);
     exit;
 }
 
@@ -127,8 +152,23 @@ if ($action !== 'view' && !isset($_SESSION['is_admin'])) {
     exit;
 }
 
+// CSRF 防护：所有写操作需要验证 token
+$mutatingActions = [
+    'save_config', 'upload_logo', 'send_test_email', 'send_test_telegram',
+    'send_test_webhook', 'refresh_account', 'fetch_instances', 'test_account',
+    'sync_account_group', 'restore_schedule_block', 'preview_ecs_create',
+    'get_ecs_disk_options', 'create_ecs', 'clear_logs',
+    'control_instance', 'delete_instance', 'replace_instance_ip'
+];
+if (in_array($action, $mutatingActions, true)) {
+    require_csrf();
+}
+
 if ($action === 'get_config') {
-    echo json_encode($app->getConfigForFrontend());
+    ensure_csrf_token();
+    $config = $app->getConfigForFrontend();
+    $config['csrf_token'] = $_SESSION['csrf_token'];
+    echo json_encode($config);
     exit;
 }
 
@@ -176,7 +216,6 @@ if ($action === 'refresh_account') {
     if ($result === false) {
         echo json_encode(['success' => false, 'message' => '刷新失败']);
     } elseif (is_array($result)) {
-        // 流量/状态刷新成功，但账单获取失败
         echo json_encode($result);
     } else {
         echo json_encode(['success' => true]);
@@ -318,15 +357,13 @@ if ($action === 'get_ecs_create_task') {
     exit;
 }
 
-// 修改：获取系统日志，支持 Tab
 if ($action === 'get_logs') {
     header('Content-Type: application/json; charset=utf-8');
-    $tab = $_GET['tab'] ?? 'action'; // 默认是动作日志
+    $tab = $_GET['tab'] ?? 'action';
     echo json_encode(['data' => $app->getSystemLogs($tab)]);
     exit;
 }
 
-// 新增：清空日志
 if ($action === 'clear_logs') {
     $data = json_decode(file_get_contents('php://input'), true);
     $tab = $data['tab'] ?? 'action';

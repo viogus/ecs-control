@@ -14,9 +14,14 @@ fi
 su -s /bin/sh www-data -c "crond -b -l 8"
 echo "Cron daemon started."
 
-# 3. 启动 Telegram 控制轮询 (后台运行)
+# 3. 启动 Telegram 控制轮询 (后台运行，崩溃自动重启)
 # 如果没有配置 Telegram，进程会保持低频等待；配置后按钮控制可秒级响应。
-su -s /bin/sh www-data -c "php /var/www/html/telegram_worker.php" >/dev/null 2>&1 &
+su -s /bin/sh www-data -c "
+    while true; do
+        php /var/www/html/telegram_worker.php >/dev/null 2>&1
+        sleep 5
+    done
+" &
 echo "Telegram control worker started."
 
 # 4. 启动 PHP-FPM (后台运行)
