@@ -19,6 +19,7 @@ class AliyunTrafficCheck
     private $notificationService;
     private $ddnsService;
     private $responseBuilder;
+    private $instanceActionService;
     private $initError = null;
 
 
@@ -33,6 +34,10 @@ class AliyunTrafficCheck
             $this->ddnsService = new DdnsService($this->configManager->getAllSettings());
             $this->responseBuilder = new FrontendResponseBuilder(
                 $this->configManager, $this->db, $this->aliyunService
+            );
+            $this->instanceActionService = new InstanceActionService(
+                $this->aliyunService, $this->configManager, $this->db,
+                $this->notificationService, $this->ddnsService
             );
 
             // 注入配置到通知服务
