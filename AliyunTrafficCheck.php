@@ -18,6 +18,7 @@ class AliyunTrafficCheck
     private $aliyunService;
     private $notificationService;
     private $ddnsService;
+    private $responseBuilder;
     private $initError = null;
 
 
@@ -30,6 +31,9 @@ class AliyunTrafficCheck
             $this->aliyunService = new AliyunService();
             $this->notificationService = new NotificationService();
             $this->ddnsService = new DdnsService($this->configManager->getAllSettings());
+            $this->responseBuilder = new FrontendResponseBuilder(
+                $this->configManager, $this->db, $this->ddnsService, $this->aliyunService
+            );
 
             // 注入配置到通知服务
             $this->notificationService->setConfig($this->configManager->getAllSettings());
@@ -260,116 +264,9 @@ class AliyunTrafficCheck
 
     public function getConfigForFrontend()
     {
-        if ($this->initError)
-            return [];
-
-        $settings = $this->configManager->getAllSettings();
-        $accountGroups = $this->configManager->getAccountGroups();
-        $groupMetrics = $this->configManager->getAccountGroupMetrics();
-        $billingMetrics = $this->getAccountGroupBillingMetrics();
-
-        $config = [
-            'admin_password' => !empty($settings['admin_password']) ? '********' : '',
-            'admin_password_set' => !empty($settings['admin_password']),
-            'traffic_threshold' => (int) ($settings['traffic_threshold'] ?? 95),
-            'shutdown_mode' => $settings['shutdown_mode'] ?? 'KeepCharging',
-            'threshold_action' => $settings['threshold_action'] ?? 'stop_and_notify',
-            'keep_alive' => ($settings['keep_alive'] ?? '0') === '1',
-            'monthly_auto_start' => ($settings['monthly_auto_start'] ?? '0') === '1',
-            'api_interval' => (int) ($settings['api_interval'] ?? 600),
-            'enable_billing' => ($settings['enable_billing'] ?? '0') === '1',
-            'AppBrand' => [
-                'logo_url' => $settings['app_logo_url'] ?? ''
-            ],
-            'Notification' => [
-                'email_enabled' => ($settings['notify_email_enabled'] ?? '1') === '1',
-                'email' => $settings['notify_email'] ?? '',
-                'host' => $settings['notify_host'] ?? '',
-                'port' => $settings['notify_port'] ?? 465,
-                'username' => $settings['notify_username'] ?? '',
-                'password' => !empty($settings['notify_password']) ? '********' : '',
-                'secure' => $settings['notify_secure'] ?? 'ssl',
-                'telegram' => [
-                    'enabled' => ($settings['notify_tg_enabled'] ?? '0') === '1',
-                    'token' => !empty($settings['notify_tg_token']) ? '********' : '',
-                    'chat_id' => $settings['notify_tg_chat_id'] ?? '',
-                    'proxy_type' => $settings['notify_tg_proxy_type'] ?? 'none',
-                    'proxy_url' => $settings['notify_tg_proxy_url'] ?? '',
-                    'proxy_ip' => $settings['notify_tg_proxy_ip'] ?? '',
-                    'proxy_port' => $settings['notify_tg_proxy_port'] ?? '',
-                    'proxy_user' => $settings['notify_tg_proxy_user'] ?? '',
-                    'proxy_pass' => !empty($settings['notify_tg_proxy_pass']) ? '********' : '',
-                    'allowed_user_ids' => $settings['notify_tg_allowed_user_ids'] ?? '',
-                    'confirm_ttl' => (int) ($settings['notify_tg_confirm_ttl'] ?? 60)
-                ],
-                'webhook' => [
-                    'enabled' => ($settings['notify_wh_enabled'] ?? '0') === '1',
-                    'url' => $settings['notify_wh_url'] ?? '',
-                    'method' => $settings['notify_wh_method'] ?? 'GET',
-                    'request_type' => $settings['notify_wh_request_type'] ?? 'JSON',
-                    'headers' => $settings['notify_wh_headers'] ?? '',
-                    'body' => $settings['notify_wh_body'] ?? ''
-                ]
-            ],
-            'Ddns' => [
-                'enabled' => ($settings['ddns_enabled'] ?? '0') === '1',
-                'provider' => $settings['ddns_provider'] ?? 'cloudflare',
-                'domain' => $settings['ddns_domain'] ?? '',
-                'cloudflare' => [
-                    'zone_id' => $settings['ddns_cf_zone_id'] ?? '',
-                    'token' => !empty($settings['ddns_cf_token']) ? '********' : '',
-                    'proxied' => ($settings['ddns_cf_proxied'] ?? '0') === '1'
-                ]
-            ],
-            'Accounts' => []
-        ];
-
-        foreach ($accountGroups as $row) {
-            $metrics = $groupMetrics[$row['groupKey']] ?? [
-                'usageUsed' => 0,
-                'usageRemaining' => (float) ($row['maxTraffic'] ?? 0),
-                'usagePercent' => 0,
-                'instanceCount' => 0,
-                'lastUpdated' => 0,
-                'trafficStatus' => 'ok',
-                'trafficMessage' => ''
-            ];
-            $config['Accounts'][] = [
-                'AccessKeyId' => $row['AccessKeyId'],
-                'AccessKeySecret' => '********',
-                'AccessKeySecretSet' => !empty($row['AccessKeySecret']),
-                'regionId' => $row['regionId'],
-                'maxTraffic' => (float) $row['maxTraffic'],
-                'remark' => $row['remark'] ?? '',
-                'siteType' => $row['siteType'] ?? 'international',
-                'groupKey' => $row['groupKey'] ?? '',
-                'scheduleEnabled' => !empty($row['scheduleEnabled']),
-                'scheduleStartEnabled' => !empty($row['scheduleStartEnabled']),
-                'scheduleStopEnabled' => !empty($row['scheduleStopEnabled']),
-                'startTime' => $row['startTime'] ?? '',
-                'stopTime' => $row['stopTime'] ?? '',
-                'scheduleBlockedByTraffic' => !empty($row['scheduleBlockedByTraffic']),
-                'usageUsed' => round((float) ($metrics['usageUsed'] ?? 0), 6),
-                'usageRemaining' => round((float) ($metrics['usageRemaining'] ?? 0), 6),
-                'usagePercent' => round((float) ($metrics['usagePercent'] ?? 0), 2),
-                'instanceCount' => (int) ($metrics['instanceCount'] ?? 0),
-                'usageLastUpdated' => !empty($metrics['lastUpdated']) ? date('Y-m-d H:i:s', (int) $metrics['lastUpdated']) : '',
-                'trafficStatus' => $metrics['trafficStatus'] ?? 'ok',
-                'trafficMessage' => $metrics['trafficMessage'] ?? '',
-                'billing' => $billingMetrics[$row['groupKey']] ?? [
-                    'enabled' => ($settings['enable_billing'] ?? '0') === '1',
-                    'monthly_cost' => null,
-                    'balance' => null,
-                    'currency' => ($row['siteType'] ?? 'international') === 'international' ? 'USD' : 'CNY',
-                    'last_updated' => null,
-                    'error' => null
-                ]
-            ];
-        }
-
-        return $config;
+        if ($this->initError) return [];
+        return $this->responseBuilder->getConfigForFrontend();
     }
-
     // --- 修改：支持按 Tab 获取日志 ---
     public function getSystemLogs($tab = 'action')
     {
