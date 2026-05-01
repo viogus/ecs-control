@@ -5,7 +5,7 @@ FROM composer:2 AS builder
 WORKDIR /app
 
 # 复制依赖定义文件
-COPY composer.json composer.lock ./
+COPY composer.json ./
 
 # 安装依赖 (排除开发依赖，优化自动加载)
 # 注意：SDK Sign::uuid() 的 microtime() 返回带空格的字符串导致签名失败，需修复
