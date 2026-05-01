@@ -64,8 +64,9 @@ RUN apk add --no-cache \
     # 预创建目录并修正权限
     && mkdir -p /var/www/html/data \
     && chown -R www-data:www-data /var/www/html \
-    # 配置 Cron (每分钟执行)
-    && echo "* * * * * /usr/local/bin/php /var/www/html/monitor.php >> /dev/null 2>&1" >> /etc/crontabs/www-data
+    # 配置 Cron (每分钟执行，dcron 要求 crontab 文件 owner 与用户名一致)
+    && echo "* * * * * /usr/local/bin/php /var/www/html/monitor.php >> /dev/null 2>&1" >> /etc/crontabs/www-data \
+    && chown www-data:www-data /etc/crontabs/www-data
 
 # 配置工作目录
 WORKDIR /var/www/html

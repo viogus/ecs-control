@@ -10,8 +10,8 @@ if [ -d "/var/www/html/data" ]; then
 fi
 
 # 2. 启动 Cron 服务 (后台运行)
-# Alpine 使用 dcron，-b 表示后台运行，-L 指定日志级别
-su -s /bin/sh www-data -c "crond -b -l 8"
+# Alpine dcron：以 root 启动守护进程，任务按 /etc/crontabs/ 下文件名自动切到对应用户执行。
+crond -b -l 8
 echo "Cron daemon started."
 
 # 3. 启动 Telegram 控制轮询 (后台运行，崩溃自动重启)
