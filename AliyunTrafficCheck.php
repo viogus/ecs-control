@@ -31,7 +31,7 @@ class AliyunTrafficCheck
             $this->configManager = new ConfigManager($this->db);
             $this->aliyunService = new AliyunService();
             $this->notificationService = new NotificationService();
-            $this->ddnsService = new DdnsService($this->configManager->getAllSettings());
+            $this->ddnsService = new DdnsService($this->configManager->getAllSettings(), $this->db, $this->configManager);
             $this->responseBuilder = new FrontendResponseBuilder(
                 $this->configManager, $this->db, $this->aliyunService
             );
@@ -581,7 +581,7 @@ class AliyunTrafficCheck
                         $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
                         $this->logNotificationResult($scheduleNotify, $accountLabel);
                         $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
-                        $this->syncDdnsForAccounts([$account], '定时开机后');
+                        $this->ddnsService->syncForAccounts([$account], '定时开机后');
                         $status = 'Starting';
                     } else {
                         $apiStatusLog .= " [定时开机失败]";
@@ -602,7 +602,7 @@ class AliyunTrafficCheck
                         $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
                         $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
                         $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '每月 1 号自动开机已执行。');
-                        $this->syncDdnsForAccounts([$account], '月初自动开机后');
+                        $this->ddnsService->syncForAccounts([$account], '月初自动开机后');
                         $status = 'Starting';
                     } else {
                         $apiStatusLog .= " [月初自动开机失败,下次重试]";
@@ -623,7 +623,7 @@ class AliyunTrafficCheck
                         $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
                         $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
                         $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '检测到实例非预期关机，保活已尝试自动启动。');
-                        $this->syncDdnsForAccounts([$account], '保活启动后');
+                        $this->ddnsService->syncForAccounts([$account], '保活启动后');
                         $status = 'Starting';
                     } else {
                         $apiStatusLog .= " [保活启动失败,下次重试]";
@@ -645,7 +645,7 @@ class AliyunTrafficCheck
         // DDNS 同步：每 10 分钟检查一次公网 IP 变化。
         $lastDdnsSync = (int) ($this->configManager->get('last_ddns_sync', 0));
         if ((time() - $lastDdnsSync) >= 600) {
-            $this->syncDdnsForAccounts($this->configManager->getAccounts(), 'Cron 周期同步');
+            $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), 'Cron 周期同步');
             $pdo = $this->db->getPdo();
             $pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_ddns_sync', ?)")->execute([time()]);
             $this->configManager->load();
@@ -985,7 +985,7 @@ class AliyunTrafficCheck
                     'internet_max_bandwidth_out' => $result['internetMaxBandwidthOut'] ?? 0
                 ]);
             }
-            $this->syncDdnsForAccounts($this->configManager->getAccounts(), "ECS 创建后");
+            $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), "ECS 创建后");
             $this->db->addLog('info', "一键创建 ECS成功 [{$this->getAccountLogLabel($account)}] {$result['instanceId']} {$preview['instanceType']} {$preview['regionId']} {$result['internetMaxBandwidthOut']}Mbps");
             $notifyResult = $this->notificationService->notifyEcsCreated($this->getAccountLogLabel($account), $result, $preview);
             $this->logNotificationResult($notifyResult, $this->getAccountLogLabel($account));
@@ -1060,7 +1060,7 @@ class AliyunTrafficCheck
             $accountGroupKey = $account['group_key'] ?: substr(sha1($account['access_key_id'] . '|' . $account['region_id']), 0, 16);
             return $accountGroupKey === $groupKey && !empty($account['instance_id']);
         }));
-        $this->reconcileDdnsAfterAccountSync($accountsBeforeSync, $this->configManager->getAccounts(), '账号同步');
+        $this->ddnsService->reconcileAfterSync($accountsBeforeSync, $this->configManager->getAccounts(), '账号同步');
         $this->db->addLog('info', "账号同步完成 [{$targetGroup['remark']}] {$targetGroup['regionId']} 实例 {$instanceCount} 台");
 
         $trafficIssue = $this->summarizeTrafficIssueForAccounts($syncedAccounts);
@@ -1523,159 +1523,6 @@ class AliyunTrafficCheck
         return $this->instanceActionService->getAllManagedInstances($sync, $buildSnapshot);
     }
 
-    private function syncDdnsForAccounts(array $accounts, $source = '同步')
-    {
-        if (!$this->ddnsService || !$this->ddnsService->isEnabled()) {
-            return;
-        }
-
-        $groupCounts = $this->getDdnsGroupCounts($accounts);
-
-        foreach ($accounts as $account) {
-            $publicIp = $this->getEffectivePublicIp($account);
-            if (empty($account['instance_id']) || $publicIp === '') {
-                continue;
-            }
-
-            try {
-                $recordName = $this->buildDdnsRecordNameForAccount($account, $groupCounts);
-
-                $result = $this->ddnsService->syncARecord($recordName, $publicIp);
-                if (!empty($result['success']) && empty($result['skipped'])) {
-                    $this->db->addLog('info', "DDNS 已同步 [{$this->getAccountLogLabel($account)}] {$recordName} -> {$publicIp} ({$source})");
-                } elseif (empty($result['success'])) {
-                    $this->db->addLog('warning', "DDNS 同步失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($result['message'] ?? '未知错误'));
-                }
-            } catch (Exception $e) {
-                $this->db->addLog('warning', "DDNS 同步失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
-            }
-        }
-    }
-
-    private function getEffectivePublicIp(array $account)
-    {
-        if (($account['public_ip_mode'] ?? '') === 'eip') {
-            $eip = trim((string) ($account['eip_address'] ?? ''));
-            // 仅当 EIP 地址为合法公网 IPv4 时才使用，否则回退到 public_ip。
-            if ($eip !== '' && filter_var($eip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                return $eip;
-            }
-        }
-
-        return trim((string) ($account['public_ip'] ?? ''));
-    }
-
-    private function reconcileDdnsAfterAccountSync(array $beforeAccounts, array $afterAccounts, $source = '同步')
-    {
-        if (!$this->ddnsService || !$this->ddnsService->isEnabled()) {
-            return;
-        }
-
-        $beforeRecords = $this->getDdnsRecordNamesForAccounts($beforeAccounts);
-        $afterRecords = $this->getDdnsRecordNamesForAccounts($afterAccounts);
-
-        foreach ($beforeRecords as $instanceId => $recordName) {
-            if ($recordName === '' || in_array($recordName, $afterRecords, true)) {
-                continue;
-            }
-            $this->deleteDdnsRecord($recordName, $source . '清理');
-        }
-
-        $this->syncDdnsForAccounts($afterAccounts, $source);
-    }
-
-    private function deleteDdnsForAccount(array $account, array $accountsBeforeDelete, $source = '释放')
-    {
-        if (!$this->ddnsService || !$this->ddnsService->isEnabled()) {
-            return;
-        }
-
-        try {
-            $recordName = $this->buildDdnsRecordNameForAccount($account, $this->getDdnsGroupCounts($accountsBeforeDelete));
-            $this->deleteDdnsRecord($recordName, $source);
-        } catch (Exception $e) {
-            $this->db->addLog('warning', "DDNS 清理失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
-        }
-    }
-
-    private function deleteDdnsRecord($recordName, $source = '清理')
-    {
-        try {
-            $result = $this->ddnsService->deleteARecord($recordName);
-            if (!empty($result['success']) && empty($result['skipped'])) {
-                $this->db->addLog('info', "DDNS 已删除 {$recordName} ({$source})");
-            } elseif (empty($result['success'])) {
-                $this->db->addLog('warning', "DDNS 删除失败 {$recordName}: " . strip_tags($result['message'] ?? '未知错误'));
-            }
-        } catch (Exception $e) {
-            $this->db->addLog('warning', "DDNS 删除失败 {$recordName}: " . strip_tags($e->getMessage()));
-        }
-    }
-
-    private function getDdnsRecordNamesForAccounts(array $accounts)
-    {
-        $groupCounts = $this->getDdnsGroupCounts($accounts);
-        $records = [];
-
-        foreach ($accounts as $account) {
-            if (empty($account['instance_id'])) {
-                continue;
-            }
-
-            try {
-                $records[$account['instance_id']] = $this->buildDdnsRecordNameForAccount($account, $groupCounts);
-            } catch (Exception $e) {
-                $this->db->addLog('warning', "DDNS 记录名生成失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
-            }
-        }
-
-        return $records;
-    }
-
-    private function buildDdnsRecordNameForAccount(array $account, array $groupCounts)
-    {
-        $groupKey = $this->getDdnsGroupKey($account);
-        return $this->ddnsService->buildRecordName([
-            'account_remark' => $this->resolveGroupRemark($account),
-            'remark' => $account['remark'] ?? '',
-            'instance_name' => $account['instance_name'] ?? '',
-            'instance_id' => $account['instance_id'] ?? ''
-        ], $groupCounts[$groupKey] ?? 1);
-    }
-
-    private function getDdnsGroupCounts(array $accounts)
-    {
-        $groupCounts = [];
-
-        foreach ($accounts as $account) {
-            if (empty($account['instance_id'])) {
-                continue;
-            }
-            $groupKey = $this->getDdnsGroupKey($account);
-            $groupCounts[$groupKey] = ($groupCounts[$groupKey] ?? 0) + 1;
-        }
-
-        return $groupCounts;
-    }
-
-    private function getDdnsGroupKey(array $account)
-    {
-        return $account['group_key'] ?: (($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? ''));
-    }
-
-    private function resolveGroupRemark(array $account)
-    {
-        $groupKey = trim((string) ($account['group_key'] ?? ''));
-        if ($groupKey !== '') {
-            foreach ($this->configManager->getAccountGroups() as $group) {
-                if (($group['groupKey'] ?? '') === $groupKey) {
-                    return trim((string) ($group['remark'] ?? ''));
-                }
-            }
-        }
-
-        return trim((string) ($account['remark'] ?? ''));
-    }
 
     public function renderTemplate()
     {
