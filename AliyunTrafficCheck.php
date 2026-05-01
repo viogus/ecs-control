@@ -948,22 +948,12 @@ class AliyunTrafficCheck
 
             $monitorWarning = '';
             $monitorChecked = false;
-            if (!empty($regionInstances)) {
-                $probe = $regionInstances[0];
-                $endMs = (int) (floor((time() - 90) / 60) * 60 * 1000);
-                $startMs = max($endMs - (10 * 60 * 1000), 0);
-                try {
-                    $this->aliyunService->getInstanceOutboundTrafficDelta([
-                        'access_key_id' => $accessKeyId,
-                        'access_key_secret' => $accessKeySecret,
-                        'instance_id' => $probe['instanceId'] ?? '',
-                        'public_ip' => $probe['publicIp'] ?? ''
-                    ], $startMs, $endMs);
-                    $monitorChecked = true;
-                } catch (\Exception $metricException) {
-                    $monitorWarning = '云监控流量探测未通过：' . strip_tags($metricException->getMessage());
-                    $this->db->addLog('warning', "账号云监控探测异常 [{$accountLabel}]: {$monitorWarning}");
-                }
+            try {
+                $cdtTraffic = $this->aliyunService->getTraffic($accessKeyId, $accessKeySecret, $regionId);
+                $monitorChecked = true;
+            } catch (\Exception $e) {
+                $monitorWarning = 'CDT 流量查询未通过：' . strip_tags($e->getMessage());
+                $this->db->addLog('warning', "账号 CDT 探测异常 [{$accountLabel}]: {$monitorWarning}");
             }
 
             $trafficUsed = (float) ($account['usageUsed'] ?? 0);
@@ -973,18 +963,16 @@ class AliyunTrafficCheck
             $message = 'AK可用，ECS API已接通';
             if ($monitorWarning !== '') {
                 $message .= '；' . $monitorWarning;
-            } elseif ($monitorChecked) {
-                $message .= '，云监控 接口 已接通';
             } else {
-                $message .= '；当前区域暂无实例，未执行云监控流量探测';
+                $message .= '，CDT 接口已接通';
             }
 
             return [
                 'success' => true,
                 'message' => $message,
                 'monitorWarning' => $monitorWarning,
-                'monitorStatus' => $monitorWarning !== '' ? 'warning' : ($monitorChecked ? 'ok' : 'skipped'),
-                'monitorMessage' => $monitorWarning !== '' ? $monitorWarning : ($monitorChecked ? '云监控接口已接通，可获取实例流量。' : '当前区域暂无实例，未执行云监控流量探测'),
+                'monitorStatus' => $monitorWarning !== '' ? 'warning' : 'ok',
+                'monitorMessage' => $monitorWarning !== '' ? $monitorWarning : 'CDT 接口已接通，可获取账号出口流量。',
                 'usageUsed' => $trafficUsed,
                 'usageRemaining' => $trafficRemaining,
                 'usagePercent' => $trafficPercent,
@@ -1259,19 +1247,15 @@ class AliyunTrafficCheck
             return '';
         }
 
-        if (isset($statuses['permission_denied'])) {
-            return '部分实例缺少云监控权限，请补充 AliyunCloudMonitorMetricDataReadOnlyAccess';
-        }
-
         if (isset($statuses['auth_error'])) {
-            return '部分实例云监控鉴权失败，请检查 AK 权限配置';
+            return '部分账号 CDT 鉴权失败，请检查 AK 权限配置';
         }
 
         if (isset($statuses['timeout'])) {
-            return '部分实例云监控请求超时，请稍后重试';
+            return '部分账号 CDT 请求超时，请稍后重试';
         }
 
-        return '部分实例流量同步失败，请稍后重试';
+        return '部分账号流量同步失败，请稍后重试';
     }
 
     public function getEcsCreateTask($taskId)
@@ -1478,41 +1462,41 @@ class AliyunTrafficCheck
     private function safeGetTraffic($account)
     {
         try {
+            $value = $this->aliyunService->getTraffic(
+                $account['access_key_id'],
+                $account['access_key_secret'],
+                $account['region_id']
+            );
             return [
                 'success' => true,
-                'value' => $this->getMeteredOutboundTraffic($account),
+                'value' => $value,
                 'status' => 'ok',
                 'message' => ''
             ];
         } catch (ClientException $e) {
             $code = trim((string) $e->getErrorCode());
-            $message = '缺少云监控权限';
-            $status = 'permission_denied';
             if ($this->isCredentialInvalidError($code, $e->getMessage())) {
-                $message = '账号 AK 已失效';
-                $status = 'auth_error';
-            } elseif ($code !== '' && !in_array($code, ['403', 'NoPermission'], true)) {
-                $message = '云监控鉴权失败';
-                $status = 'auth_error';
+                $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: AK 已失效");
+                return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
             }
-            $this->db->addLog('error', "公网出口流量查询配置错误 [{$this->getAccountLogLabel($account)}]: " . ($code ?: "鉴权失败") . "，请确认AK拥有云监控流量查询权限");
-            return ['success' => false, 'value' => null, 'status' => $status, 'message' => $message];
+            $this->db->addLog('error', "CDT 流量查询配置错误 [{$this->getAccountLogLabel($account)}]: " . ($code ?: "鉴权失败") . "，请确认 AK 拥有 CDT 权限");
+            return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => 'CDT 权限不足，请确认 AK 拥有 cdt:ListCdtInternetTraffic 权限'];
         } catch (ServerException $e) {
             $code = trim((string) $e->getErrorCode());
             if ($this->isCredentialInvalidError($code, $e->getErrorMessage())) {
-                $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: {$code} - " . $e->getErrorMessage());
+                $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: {$code} - " . $e->getErrorMessage());
                 return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
             }
-            $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: " . $e->getErrorCode() . " - " . $e->getErrorMessage());
-            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => '云监控接口异常'];
+            $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: " . $e->getErrorCode() . " - " . $e->getErrorMessage());
+            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => 'CDT 接口异常'];
         } catch (\Exception $e) {
             if (strpos($e->getMessage(), 'cURL error') !== false) {
-                $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: 网络连接超时");
-                return ['success' => false, 'value' => null, 'status' => 'timeout', 'message' => '云监控请求超时'];
+                $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: 网络连接超时");
+                return ['success' => false, 'value' => null, 'status' => 'timeout', 'message' => 'CDT 请求超时'];
             }
 
-            $this->db->addLog('error', "公网出口流量查询失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
-            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => '流量同步失败'];
+            $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => 'CDT 流量同步失败'];
         }
     }
 
@@ -1522,13 +1506,15 @@ class AliyunTrafficCheck
         $groupKey = trim((string) ($account['group_key'] ?? ''));
         $billingMonth = date('Y-m');
 
+        // CDT 返回的是 per-AK 月度总流量，同一 group 下所有实例共享 AK 和流量值。
+        // 取第一条记录的 traffic_used，不 SUM。
         if ($groupKey !== '') {
-            $stmt = $pdo->prepare("SELECT COALESCE(SUM(traffic_used), 0) FROM accounts WHERE group_key = ? AND traffic_billing_month = ?");
+            $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE group_key = ? AND traffic_billing_month = ? LIMIT 1");
             $stmt->execute([$groupKey, $billingMonth]);
             return (float) $stmt->fetchColumn();
         }
 
-        $stmt = $pdo->prepare("SELECT COALESCE(SUM(traffic_used), 0) FROM accounts WHERE access_key_id = ? AND region_id = ? AND traffic_billing_month = ?");
+        $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE access_key_id = ? AND region_id = ? AND traffic_billing_month = ? LIMIT 1");
         $stmt->execute([$account['access_key_id'] ?? '', $account['region_id'] ?? '', $billingMonth]);
         return (float) $stmt->fetchColumn();
     }
