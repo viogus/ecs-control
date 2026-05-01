@@ -29,7 +29,11 @@ echo "Telegram control worker started."
 php-fpm -D
 echo "PHP-FPM started."
 
-# 5. 启动 Nginx (前台运行)
-# 保持 Nginx 在前台运行，防止容器退出
+# 5. 用 PORT 环境变量替换 Nginx 监听端口，默认 43210
+LISTEN_PORT="${PORT:-43210}"
+sed -i "s/listen 80;/listen ${LISTEN_PORT};/" /etc/nginx/http.d/default.conf
+echo "Nginx will listen on port ${LISTEN_PORT}"
+
+# 6. 启动 Nginx (前台运行)
 echo "Nginx started."
 nginx -g 'daemon off;'

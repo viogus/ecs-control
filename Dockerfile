@@ -82,8 +82,8 @@ RUN chmod +x /entrypoint.sh
 # 最后复制项目代码 (变更频率高，放在最后)
 COPY --from=builder --chown=www-data:www-data /app /var/www/html
 
-# 暴露端口
-EXPOSE 80
+# 暴露端口 (由 PORT 环境变量控制，默认 43210)
+EXPOSE ${PORT}
 
 # 设置容器启动入口
 ENTRYPOINT ["/entrypoint.sh"]

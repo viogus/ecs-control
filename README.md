@@ -40,7 +40,7 @@ services:
     container_name: ecs-control
     restart: always
     ports:
-      - "${PORT:-43210}:80"
+      - "${PORT:-43210}:${PORT:-43210}"
     volumes:
       - ./data:/var/www/html/data
     environment:
