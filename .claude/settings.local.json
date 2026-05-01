@@ -1,0 +1,22 @@
+{
+  "env": {
+    "ECC_DISABLED_HOOKS": "pre:bash:gateguard-fact-force,pre:edit-write:gateguard-fact-force"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(gh api *)",
+      "Read(//tmp/**)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/Kori1c/ecs-controller/main/static/tailwind-compiled.css\" -o /tmp/tailwind-compiled.css)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/Kori1c/ecs-controller/main/static/vue.global.prod.js\" -o /tmp/vue.global.prod.js)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/Kori1c/ecs-controller/main/static/echarts.min.js\" -o /tmp/echarts.min.js)",
+      "Bash(cp /tmp/tailwind-compiled.css /Users/cdf/Codes/ecs-control/static/tailwind-compiled.css)",
+      "Bash(cp /tmp/vue.global.prod.js /Users/cdf/Codes/ecs-control/static/vue.global.prod.js)",
+      "Bash(cp /tmp/echarts.min.js /Users/cdf/Codes/ecs-control/static/echarts.min.js)",
+      "Bash(cp /tmp/icon.png /Users/cdf/Codes/ecs-control/icon.png)",
+      "Bash(cp /tmp/template.html /Users/cdf/Codes/ecs-control/template.html)",
+      "Bash(chmod +x /Users/cdf/Codes/ecs-control/docker/entrypoint.sh)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}
