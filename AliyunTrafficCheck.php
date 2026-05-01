@@ -650,43 +650,44 @@ class AliyunTrafficCheck
             $stopTime = trim((string) ($account['stop_time'] ?? ''));
             $today = date('Y-m-d', $currentTime);
 
-            if ($scheduleEnabled && !$scheduleBlockedByTraffic && !$requiresTrafficProtection && !in_array($status, ['Starting', 'Stopping', 'Pending', 'Releasing', 'Released'], true)) {
-                if ($scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account['schedule_last_stop_date'] ?? '')) {
-                    if ($status === 'Running') {
-                        if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
-                            $actions[] = "定时停机";
-                            $this->db->addLog('info', "执行定时停机 [{$accountLabel}] {$stopTime}");
-                            $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
-                            $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
-                            $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
-                            $this->logNotificationResult($scheduleNotify, $accountLabel);
-                            $this->notifyStatusChangeIfNeeded($account, 'Running', 'Stopping', '已按计划执行定时停机。');
-                            $status = 'Stopping';
-                        } else {
-                            $apiStatusLog .= " [定时停机失败]";
-                        }
-                    } else {
-                        $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
-                    }
-                }
+            $scheduleAllowed = $scheduleEnabled && !$scheduleBlockedByTraffic && !$requiresTrafficProtection;
+            $isStableState = !in_array($status, ['Starting', 'Stopping', 'Pending', 'Releasing', 'Released'], true);
 
-                if ($scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account['schedule_last_start_date'] ?? '')) {
-                    if ($status === 'Stopped') {
-                        if ($this->safeControlInstance($account, 'start')) {
-                            $actions[] = "定时开机";
-                            $this->db->addLog('info', "执行定时开机 [{$accountLabel}] {$startTime}");
-                            $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
-                            $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
-                            $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
-                            $this->logNotificationResult($scheduleNotify, $accountLabel);
-                            $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
-                            $status = 'Starting';
-                        } else {
-                            $apiStatusLog .= " [定时开机失败]";
-                        }
+            if ($scheduleAllowed && $scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account['schedule_last_stop_date'] ?? '')) {
+                if ($isStableState && $status === 'Running') {
+                    if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
+                        $actions[] = "定时停机";
+                        $this->db->addLog('info', "执行定时停机 [{$accountLabel}] {$stopTime}");
+                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
+                        $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                        $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
+                        $this->logNotificationResult($scheduleNotify, $accountLabel);
+                        $this->notifyStatusChangeIfNeeded($account, 'Running', 'Stopping', '已按计划执行定时停机。');
+                        $status = 'Stopping';
                     } else {
-                        $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                        $apiStatusLog .= " [定时停机失败]";
                     }
+                } else {
+                    $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                }
+            }
+
+            if ($scheduleAllowed && $scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account['schedule_last_start_date'] ?? '')) {
+                if ($isStableState && $status === 'Stopped') {
+                    if ($this->safeControlInstance($account, 'start')) {
+                        $actions[] = "定时开机";
+                        $this->db->addLog('info', "执行定时开机 [{$accountLabel}] {$startTime}");
+                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
+                        $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                        $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
+                        $this->logNotificationResult($scheduleNotify, $accountLabel);
+                        $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
+                        $status = 'Starting';
+                    } else {
+                        $apiStatusLog .= " [定时开机失败]";
+                    }
+                } else {
+                    $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
                 }
             }
 
