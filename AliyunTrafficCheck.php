@@ -32,7 +32,7 @@ class AliyunTrafficCheck
             $this->notificationService = new NotificationService();
             $this->ddnsService = new DdnsService($this->configManager->getAllSettings());
             $this->responseBuilder = new FrontendResponseBuilder(
-                $this->configManager, $this->db, $this->ddnsService, $this->aliyunService
+                $this->configManager, $this->db, $this->aliyunService
             );
 
             // 注入配置到通知服务

@@ -4,18 +4,15 @@ class FrontendResponseBuilder
 {
     private ConfigManager $configManager;
     private Database $db;
-    private DdnsService $ddnsService;
     private AliyunService $aliyunService;
 
     public function __construct(
         ConfigManager $configManager,
         Database $db,
-        DdnsService $ddnsService,
         AliyunService $aliyunService
     ) {
         $this->configManager = $configManager;
         $this->db = $db;
-        $this->ddnsService = $ddnsService;
         $this->aliyunService = $aliyunService;
     }
 
