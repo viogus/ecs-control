@@ -1,2 +1,269 @@
-# ecs-control
+# ecs-control 🌩️
 A lightweight controller for cloud server monitoring, traffic control, quota protection, and automated operations.
+
+<p align="center">
+  <img src="./icon.png" width="120" height="120" alt="ecs-controller Logo">
+</p>
+
+> **阿里云 流量监控与自动化管理终极解决方案**
+> 
+> 集成流量实时监控、自动熔断保护、抢占式实例保活、**实例规格与价格透明展示**于一体。
+
+## ⚠️ 免责声明
+
+1. **配置参考**：本项目提供的默认一键创建配置仅供参考，请在下单前务必核对阿里云最新的 API 返回价格。
+2. **代码修改**：代码完全开源，您可以根据个人需求自行修改逻辑或 UI。
+3. **AI 开发声明**：本项目由 **AI (Claude)** 深度参与开发。作者已尽最大努力确保核心功能（如流量熔断、自动释放）的逻辑正确性。
+4. **Bug 修复**：由于云平台 API 变动或环境差异，如遇见 Bug 建议先行尝试自行修复，或提交 **Issue / PR**，由于精力有限，作者不保证实时维护。
+5. **风险自担**：因使用本脚本、或是阿里云 API 异常导致的相关资源损失或超支费用，作者概不负责。
+
+---
+
+## 🆕 最近更新
+
+- 新增页面 Logo 自定义，支持本地上传或填写图片地址。
+- 优化一键创建 ECS：支持公网 IP 类型、硬盘类型、系统盘大小校验与更换公网 IP。
+- 优化释放中实例展示、前后端状态联动和移动端浮窗/表单体验。
+
+---
+
+## 🚀 快速部署
+
+### 方式一：Docker Compose (推荐)
+这是最省心的部署方案，内置了自动化的定时任务巡检，无需额外配置 Crontab。
+
+1. **新建配置文件** `docker-compose.yml`：
+```yaml
+services:
+  ecs-controller:
+    image: ghcr.io/viogus/ecs-control:latest
+    container_name: ecs-control
+    restart: always
+    ports:
+      - "43210:80"
+    volumes:
+      - ./data:/var/www/html/data
+    environment:
+      - TZ=Asia/Shanghai
+```
+
+2. **启动服务**：
+```bash
+docker-compose up -d
+```
+访问 `http://localhost:43210` 即可开始使用。
+
+---
+
+## 🔑 获取阿里云密钥
+
+为了让系统能够正常获取流量数据并管理实例，您需要准备具有相关权限的阿里云 AccessKey：
+
+1. **登录阿里云控制台**，前往 [RAM 访问控制 - 用户](https://ram.console.aliyun.com/users)。
+2. **创建用户**：点击“创建用户”，勾选“OpenAPI 调用访问”。
+3. **获取密钥**：保存好生成的 `AccessKey ID` 和 `AccessKey Secret`。
+4. **添加权限**：建议创建自定义 RAM 权限策略，按需授予最小权限。
+
+### 核心功能最低权限
+
+如果只使用实例同步、流量监控、自动停机、手动开关机和释放实例，至少需要：
+
+```text
+cms:DescribeMetricList
+ecs:DescribeInstances
+ecs:DescribeInstanceStatus
+ecs:StartInstance
+ecs:StopInstance
+ecs:DeleteInstance
+cdt:ListCdtInternetTraffic
+```
+
+其中 `cms:DescribeMetricList` 用于获取 ECS 公网出口流量，缺少后会导致流量统计不可用或自动停机不准确。
+
+### 全功能推荐权限
+
+如果需要使用本项目的全部功能，包括一键创建 ECS、自动创建网络与安全组、EIP 申请/绑定/释放、更换公网 IP、消费情况查询，建议使用以下自定义策略：
+
+```json
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeRegions",
+        "ecs:DescribeZones",
+        "ecs:DescribeInstances",
+        "ecs:DescribeInstanceStatus",
+        "ecs:DescribeInstancesFullStatus",
+        "ecs:DescribeInstanceTypes",
+        "ecs:DescribeImages",
+        "ecs:DescribeAvailableResource",
+        "ecs:DescribeSecurityGroups",
+        "ecs:StartInstance",
+        "ecs:StopInstance",
+        "ecs:DeleteInstance",
+        "ecs:RunInstances",
+        "ecs:CreateSecurityGroup",
+        "ecs:AuthorizeSecurityGroup"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "vpc:DescribeVpcs",
+        "vpc:DescribeVSwitches",
+        "vpc:CreateVpc",
+        "vpc:CreateVSwitch",
+        "vpc:DescribeEipAddresses",
+        "vpc:AllocateEipAddress",
+        "vpc:AssociateEipAddress",
+        "vpc:UnassociateEipAddress",
+        "vpc:ReleaseEipAddress"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cms:DescribeMetricList"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cdt:ListCdtInternetTraffic"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bssapi:QueryAccountBalance",
+        "bssapi:DescribeInstanceBill",
+        "bssapi:QueryBillOverview"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+如果不需要消费情况展示，可以去掉 `bssapi:*` 相关权限。
+
+---
+
+## ✨ 核心功能
+
+
+### 🛡️ 流量盾牌 (CDT 监控)
+- **多账户聚合**：支持同时管理多个阿里云 AK/SK，多区域实例一屏尽览。
+- **自然月流量重置**：自动适配阿里云 CDT 计费周期，每月 1 号零点自动重置已用流量统计。
+- **熔断机制**：支持设定 **告警阈值 (如 95%)**，触发时自动执行关机动作。
+- **灵活关机模式**：可选 **普通停机 (KeepCharging)** 或 **节省停机 (StopCharging/释放计算资源停止计费)**。
+
+### ⚡ 自动化高阶管理
+- **异步安全释放**：彻底解决释放逻辑响应缓慢问题。点击后后台接管，自动执行“强制离线 -> 等待状态 -> 物理销毁”全流程，无需前台苦等。
+- **抢占式实例保活**：实时守护低成本 Spot 实例，检测到非预期停机时（如被回收）自动重试拉起。
+- **定时任务清单**：支持为指定实例设置每日定时开机、定时关机计划（自定义时间点）。
+- **ECS 快速创建**：支持从预设规格中一键拉起新实例（默认采用最低配置、最低价格方案），并自动配置安全组与防火墙规则。
+- **预检与成本预览**：创建前自动调用阿里云 API 进行库存预检与其费用估算，拒绝盲目下单。
+- **初次登录信息保护**：针对新建实例，系统仅在创建成功的瞬间展示初始密码，确保 AK/SK 与凭据安全。
+- **DDNS 联动**：深度集成 **Cloudflare**，实例重启 IP 变更后自动同步 A 记录。
+
+### 📊 成本与审计
+- **费用中心**：实时拉取账号 **可用余额**，并预估当月实例已产生账单金额。
+- **实时日志审计**：详细记录系统心跳、API 调用状态、告警触发记录，支持分级清理，保证系统轻量运行。
+- **一键同步**：支持主动从阿里云云端同步最新机器规格、状态、公网 IP 等所有属性。
+
+### 📢 预警系统
+- **多通路覆盖**：集成 **Telegram (纸飞机)**、**SMTP 邮件** 及 **通用 Webhook** 接口。
+- **状态变更通知**：实例关机、启动、释放成功、流量超标时均会发送详尽的富文本通知。
+
+---
+
+## 💡 省钱小秘籍 (Saving Tips)
+
+- **流量熔断**：系统默认检测到流量即将用尽时自动关机（建议配合“节省停机”模式），确保不产生额外扣费，真正做到“用完即止”。
+- **折扣充值**：本项目可搭配 [portal.acm.ee](https://portal.acm.ee/) 使用，享受阿里云七折充值优惠，叠加 CDT 200GB 免费流量，实现在线极致性价比。
+
+---
+
+## 📸 界面预览
+
+> 以下截图来自测试环境，仅用于展示界面结构与核心流程。正式使用时请妥善保管 AK/SK、服务器密码、通知 Token 等敏感信息。
+
+### 实例状态总览
+
+卡片式展示所有已同步 ECS：运行状态、区域、实例编号、公网地址、出口流量、带宽峰值、阈值与最后同步时间一屏可见。
+
+![实例状态总览](./image/截屏2026-04-16%2012.15.51.png)
+
+### 实例管理
+
+集中管理账号下的全部实例，支持手动同步、启动、停止、释放，以及查看实例规格、出口流量和公网带宽。
+
+![实例管理](./image/截屏2026-04-16%2012.15.56.png)
+
+### 账号管理
+
+账号以列表方式维护，支持备注名、区域、站点、账号可用流量、消费情况与同步状态展示；新增账号使用弹窗填写，避免页面过长。
+
+![账号管理](./image/截屏2026-04-16%2012.16.05.png)
+
+### 系统设置
+
+全局阈值、实例同步频率、停机方式、自动开机、抢占式保活、费用分析、DDNS 与通知配置统一收纳到系统设置中。
+
+![系统设置](./image/截屏2026-04-16%2012.16.12.png)
+
+### 系统日志
+
+区分动作日志与心跳日志，方便排查接口调用、实例状态变化、流量熔断、DDNS 同步和通知推送结果。
+
+![系统日志](./image/截屏2026-04-16%2012.16.18.png)
+
+### 一键创建 ECS
+
+创建前会生成配置清单：实例规格、系统镜像、系统盘、网络、安全组、公网带宽与费用提示都会在确认前展示，避免盲目下单。
+
+![一键创建 ECS 配置清单](./image/截屏2026-04-16%2011.24.03.png)
+
+### 新增账号弹窗
+
+账号录入通过弹窗完成，填写备注名、AK、区域、站点和账号可用流量后即可保存并同步实例。
+
+![新增账号弹窗](./image/截屏2026-04-16%2012.16.27.png)
+
+---
+
+
+
+## 🛠️ 技术架构
+
+- **Backend**: 原生 PHP 8.1+，无框架依赖，追求极致性能。
+- **Database**: SQLite 3 (WAL 模式)，兼顾轻量与读写并发。
+- **Frontend**: Vue 3.x (SFC 理念) + 原生 Vanilla CSS。
+- **SDK**: Alibaba Cloud SDK for PHP (V1)。
+
+---
+
+## ☕ 赏杯咖啡 (Donation)
+
+如果您觉得这个工具对您有帮助，阔佬随手赏杯咖啡：
+
+---
+
+
+
+
+## 📄 许可协议
+
+本项目遵循 [MIT License](https://opensource.org/licenses/MIT) 开源协议。
+
+---
+<p align="center">Made with ❤️ for Aliyun Users</p>
+<p align="center">Based on <a href="https://github.com/wang4386/CDT-Monitor">CDT-Monitor</a></p>
+

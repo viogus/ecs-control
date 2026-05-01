@@ -1,0 +1,14 @@
+services:
+  ecs-controller:
+    build: .
+    container_name: ecs-control
+    restart: always
+    ports:
+      - "43210:80"
+    volumes:
+      - ./data:/var/www/html/data
+    environment:
+      - TZ=Asia/Shanghai
+    dns:
+      - 223.5.5.5
+      - 114.114.114.114
