@@ -11,7 +11,7 @@ fi
 
 # 2. 启动 Cron 服务 (后台运行)
 # Alpine 使用 dcron，-b 表示后台运行，-L 指定日志级别
-crond -b -l 8
+su -s /bin/sh www-data -c "crond -b -l 8"
 echo "Cron daemon started."
 
 # 3. 启动 Telegram 控制轮询 (后台运行)

@@ -481,10 +481,12 @@ class Database
     public function pruneStats()
     {
         $hourLimit = time() - (48 * 3600);
-        $this->pdo->exec("DELETE FROM traffic_hourly WHERE recorded_at < $hourLimit");
+        $stmt = $this->pdo->prepare("DELETE FROM traffic_hourly WHERE recorded_at < ?");
+        $stmt->execute([$hourLimit]);
 
         $dayLimit = time() - (60 * 86400);
-        $this->pdo->exec("DELETE FROM traffic_daily WHERE recorded_at < $dayLimit");
+        $stmt = $this->pdo->prepare("DELETE FROM traffic_daily WHERE recorded_at < ?");
+        $stmt->execute([$dayLimit]);
 
         $monthLimit = date('Y-m', strtotime('-4 months'));
         $stmt = $this->pdo->prepare("DELETE FROM instance_traffic_usage WHERE billing_month < ?");
@@ -556,7 +558,8 @@ class Database
     public function pruneBillingCache()
     {
         $limit = time() - (90 * 86400);
-        $this->pdo->exec("DELETE FROM billing_cache WHERE updated_at < $limit");
+        $stmt = $this->pdo->prepare("DELETE FROM billing_cache WHERE updated_at < ?");
+        $stmt->execute([$limit]);
     }
 
     public function createEcsCreateTask($taskId, $previewId, $groupKey, $regionId, $instanceType, $payload)

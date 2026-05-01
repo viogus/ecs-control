@@ -55,9 +55,11 @@ if ($action === 'setup') {
 }
 
 if ($action === 'login') {
+    header('Content-Type: application/json');
     $data = json_decode(file_get_contents('php://input'), true);
     try {
         if ($app->login($data['password'] ?? '')) {
+            session_regenerate_id(true);
             $_SESSION['is_admin'] = true;
             echo json_encode(['success' => true]);
         } else {
@@ -70,6 +72,7 @@ if ($action === 'login') {
 }
 
 if ($action === 'check_login') {
+    header('Content-Type: application/json');
     echo json_encode(['logged_in' => isset($_SESSION['is_admin']) && $_SESSION['is_admin'] === true]);
     exit;
 }
