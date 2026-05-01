@@ -16,7 +16,9 @@
       "Bash(cp /tmp/template.html /Users/cdf/Codes/ecs-control/template.html)",
       "Bash(chmod +x /Users/cdf/Codes/ecs-control/docker/entrypoint.sh)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(sed -n '1490,1494p' AliyunTrafficCheck.php)",
+      "Bash(sed -n '1525,1532p' AliyunTrafficCheck.php)"
     ]
   }
 }
