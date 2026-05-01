@@ -68,7 +68,7 @@ RUN apk add --no-cache \
     && mkdir -p /var/www/html/data \
     && chown -R www-data:www-data /var/www/html \
     # 配置 Cron (每分钟执行，dcron 要求 crontab 文件 owner 与用户名一致)
-    && echo "* * * * * /usr/local/bin/php /var/www/html/monitor.php >> /var/log/cron-monitor.log 2>&1" >> /etc/crontabs/www-data \
+    && echo "* * * * * cd /var/www/html && /usr/local/bin/php /var/www/html/monitor.php >> /var/log/cron-monitor.log 2>&1" >> /etc/crontabs/www-data \
     && chown www-data:www-data /etc/crontabs/www-data \
     && touch /var/log/cron-monitor.log && chown www-data:www-data /var/log/cron-monitor.log
 
