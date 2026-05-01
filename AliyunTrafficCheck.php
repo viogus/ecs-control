@@ -679,6 +679,7 @@ class AliyunTrafficCheck
                         $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
                         $this->logNotificationResult($scheduleNotify, $accountLabel);
                         $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
+                        $this->syncDdnsForAccounts([$account], '定时开机后');
                         $status = 'Starting';
                     } else {
                         $apiStatusLog .= " [定时开机失败]";
@@ -688,9 +689,9 @@ class AliyunTrafficCheck
                 }
             }
 
-            // 4. 每月自动开机：只在每月 1 号执行，且不会启动已经触发流量保护的实例。
+            // 4. 每月自动开机：只在每月 1 号执行，且不会启动已触发流量保护或被流量熔断封锁的实例。
             $autoStartBlocked = !empty($account['auto_start_blocked']);
-            if ($monthlyAutoStart && !$autoStartBlocked && !$requiresTrafficProtection && date('j', $currentTime) === '1') {
+            if ($monthlyAutoStart && !$autoStartBlocked && !$requiresTrafficProtection && !$scheduleBlockedByTraffic && date('j', $currentTime) === '1') {
                 $lastMonthlyStart = (int) ($account['last_keep_alive_at'] ?? 0);
                 if ($status === 'Stopped' && !$this->isSameMonth($lastMonthlyStart, $currentTime)) {
                     if ($this->safeControlInstance($account, 'start')) {
@@ -699,6 +700,7 @@ class AliyunTrafficCheck
                         $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
                         $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
                         $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '每月 1 号自动开机已执行。');
+                        $this->syncDdnsForAccounts([$account], '月初自动开机后');
                         $status = 'Starting';
                     } else {
                         $apiStatusLog .= " [月初自动开机失败,下次重试]";
@@ -719,6 +721,7 @@ class AliyunTrafficCheck
                         $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
                         $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
                         $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '检测到实例非预期关机，保活已尝试自动启动。');
+                        $this->syncDdnsForAccounts([$account], '保活启动后');
                         $status = 'Starting';
                     } else {
                         $apiStatusLog .= " [保活启动失败,下次重试]";
@@ -736,6 +739,9 @@ class AliyunTrafficCheck
         }
 
         $this->configManager->updateLastRunTime(time());
+
+        // DDNS 同步：确保公网 IP 变化后 Cron 路径也能自动更新解析。
+        $this->syncDdnsForAccounts($this->configManager->getAccounts(), 'Cron 周期同步');
 
         // 执行异步彻底销毁循环
         $this->processPendingReleases();
@@ -1414,7 +1420,21 @@ class AliyunTrafficCheck
         }
 
         $today = date('Y-m-d', $currentTime);
-        return date('H:i', $currentTime) === $targetTime && (string) $lastRunDate !== $today;
+        if ((string) $lastRunDate === $today) {
+            return false;
+        }
+
+        // 宽松窗口：目标时间前后 5 分钟内均可触发。
+        // API 偶发失败重试后时间已过也会错过，此处确保一次失败仍有挽回余地。
+        $targetMinutes = $this->timeToMinutes($targetTime);
+        $currentMinutes = (int) date('G', $currentTime) * 60 + (int) date('i', $currentTime);
+        return abs($currentMinutes - $targetMinutes) <= 5;
+    }
+
+    private function timeToMinutes($hhmm)
+    {
+        $parts = explode(':', $hhmm);
+        return (int) $parts[0] * 60 + (int) $parts[1];
     }
 
     private function isCredentialInvalidTrafficStatus($status)
@@ -2036,7 +2056,8 @@ class AliyunTrafficCheck
     {
         if (($account['public_ip_mode'] ?? '') === 'eip') {
             $eip = trim((string) ($account['eip_address'] ?? ''));
-            if ($eip !== '') {
+            // 仅当 EIP 地址为合法公网 IPv4 时才使用，否则回退到 public_ip。
+            if ($eip !== '' && filter_var($eip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
                 return $eip;
             }
         }

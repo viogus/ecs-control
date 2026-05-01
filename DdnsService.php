@@ -61,6 +61,17 @@ class DdnsService
         }
 
         $existing = $this->findRecord($recordName);
+
+        // IP 未变化时跳过，避免不必要的 Cloudflare API 调用。
+        if ($existing && ($existing['content'] ?? '') === $ip) {
+            return [
+                'success' => true,
+                'skipped' => true,
+                'record' => $recordName,
+                'ip' => $ip
+            ];
+        }
+
         $payload = [
             'type' => 'A',
             'name' => $recordName,
