@@ -740,8 +740,14 @@ class AliyunTrafficCheck
 
         $this->configManager->updateLastRunTime(time());
 
-        // DDNS 同步：确保公网 IP 变化后 Cron 路径也能自动更新解析。
-        $this->syncDdnsForAccounts($this->configManager->getAccounts(), 'Cron 周期同步');
+        // DDNS 同步：每 10 分钟检查一次公网 IP 变化。
+        $lastDdnsSync = (int) ($this->configManager->get('last_ddns_sync', 0));
+        if ((time() - $lastDdnsSync) >= 600) {
+            $this->syncDdnsForAccounts($this->configManager->getAccounts(), 'Cron 周期同步');
+            $pdo = $this->db->getPdo();
+            $pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_ddns_sync', ?)")->execute([time()]);
+            $this->configManager->load();
+        }
 
         // 执行异步彻底销毁循环
         $this->processPendingReleases();
