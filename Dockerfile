@@ -15,6 +15,9 @@ RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs --no-
 # 复制其余项目文件
 COPY . .
 
+# 重新生成 autoload classmap，包含 src/ 下的新 class
+RUN composer dump-autoload -o
+
 # -----------------------------------------------------------------------------
 
 # 第二阶段：运行环境 (Final Stage)
