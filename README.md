@@ -40,10 +40,11 @@ services:
     container_name: ecs-control
     restart: always
     ports:
-      - "43210:80"
+      - "${PORT:-43210}:80"
     volumes:
       - ./data:/var/www/html/data
     environment:
+      - PORT=${PORT:-43210}
       - TZ=Asia/Shanghai
 ```
 
@@ -51,7 +52,7 @@ services:
 ```bash
 docker-compose up -d
 ```
-访问 `http://localhost:43210` 即可开始使用。
+访问 `http://localhost:43210` 即可开始使用。如需自定义端口，设置环境变量 `PORT` 即可，例如 `PORT=8080 docker-compose up -d`。
 
 ---
 

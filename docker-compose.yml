@@ -4,10 +4,11 @@ services:
     container_name: ecs-control
     restart: always
     ports:
-      - "43210:80"
+      - "${PORT:-43210}:80"
     volumes:
       - ./data:/var/www/html/data
     environment:
+      - PORT=${PORT:-43210}
       - TZ=Asia/Shanghai
     dns:
       - 223.5.5.5

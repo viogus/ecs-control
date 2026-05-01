@@ -25,7 +25,9 @@ FROM php:8.2-fpm-alpine
 LABEL maintainer="ECS-Controller-Docker"
 
 # 设置环境变量
-ENV TZ=Asia/Shanghai
+ARG PORT=43210
+ENV PORT=${PORT} \
+    TZ=Asia/Shanghai
 
 # 安装系统依赖、编译 PHP 扩展、清理依赖、配置时区
 # 将所有 RUN 指令合并以减少镜像层数
