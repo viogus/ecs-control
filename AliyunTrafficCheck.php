@@ -873,10 +873,20 @@ class AliyunTrafficCheck
         return $this->instanceActionService->getAllManagedInstances($sync, [$this->responseBuilder, 'buildInstanceSnapshot']);
     }
 
-    public function getEcsCreateTask($taskId)
+    // 供 controlInstanceAction 回调使用，主监控循环的完整版本在 MonitorService 中
+    public function notifyStatusChangeIfNeeded($account, $fromStatus, $toStatus, $reason = '')
     {
-        if ($this->initError) return null;
-        return $this->db->getEcsCreateTask($taskId);
+        $fromStatus = (string) ($fromStatus ?: 'Unknown');
+        $toStatus = (string) ($toStatus ?: 'Unknown');
+        if ($fromStatus === $toStatus || !in_array($toStatus, ['Running', 'Stopped'], true)) return;
+        if ($fromStatus === 'Unknown') return;
+        $accountLabel = $this->getAccountLogLabel($account);
+        $result = $this->notificationService->notifyInstanceStatusChanged($accountLabel, $account, $fromStatus, $toStatus, $reason);
+        if ($result === true) {
+            $this->db->addLog('info', "通知推送成功 [$accountLabel]");
+        } elseif ($result !== false && $result !== true) {
+            $this->db->addLog('warning', "通知推送异常/失败 [$accountLabel]: " . strip_tags($result));
+        }
     }
 
     public function sendTestEmail($to)
