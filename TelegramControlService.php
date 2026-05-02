@@ -7,6 +7,7 @@ class TelegramControlService
     private $configManager;
     private $app;
     private $settings;
+    private TelegramApi $api;
 
     public function __construct(Database $db, ConfigManager $configManager, $app)
     {
@@ -15,6 +16,7 @@ class TelegramControlService
         $this->configManager = $configManager;
         $this->app = $app;
         $this->settings = $configManager->getAllSettings();
+        $this->api = new TelegramApi($this->settings);
     }
 
     public function processUpdates()
@@ -36,7 +38,7 @@ class TelegramControlService
         try {
             $this->cleanupExpiredTokens();
             $offset = ((int) $this->getState('last_update_id', '0')) + 1;
-            $response = $this->api('getUpdates', [
+            $response = $this->api->call('getUpdates', [
                 'offset' => $offset,
                 'limit' => 20,
                 'timeout' => max(0, (int) $timeout),
@@ -115,16 +117,16 @@ class TelegramControlService
         $command = strtolower(preg_replace('/@.+$/', '', strtok($text, " \n\t") ?: ''));
 
         if (in_array($command, ['/traffic', '流量'], true)) {
-            $this->sendMessage($chatId, $this->buildTrafficText(), $this->trafficKeyboard());
+            $this->api->sendMessage($chatId, $this->buildTrafficText(), $this->trafficKeyboard());
             return;
         }
 
         if (in_array($command, ['/instances', '实例'], true)) {
-            $this->sendMessage($chatId, $this->buildInstancesText(1), $this->instancesKeyboard(1));
+            $this->api->sendMessage($chatId, $this->buildInstancesText(1), $this->instancesKeyboard(1));
             return;
         }
 
-        $this->sendMessage($chatId, $this->mainMenuText(), $this->mainMenuKeyboard());
+        $this->api->sendMessage($chatId, $this->mainMenuText(), $this->mainMenuKeyboard());
     }
 
     private function handleCallback(array $callback)
@@ -139,86 +141,86 @@ class TelegramControlService
         $data = (string) ($callback['data'] ?? '');
 
         if (!$this->isAllowed($chatId, $userId)) {
-            $this->answerCallback($id, '没有权限执行该操作');
+            $this->api->answerCallback($id, '没有权限执行该操作');
             return;
         }
 
         $parts = explode(':', $data);
         if (($parts[0] ?? '') !== 'm') {
-            $this->answerCallback($id);
+            $this->api->answerCallback($id);
             return;
         }
 
         $action = $parts[1] ?? 'home';
         if ($action === 'home') {
-            $this->answerCallback($id);
-            $this->editMessage($chatId, $messageId, $this->mainMenuText(), $this->mainMenuKeyboard());
+            $this->api->answerCallback($id);
+            $this->api->editMessage($chatId, $messageId, $this->mainMenuText(), $this->mainMenuKeyboard());
         } elseif ($action === 'help') {
-            $this->answerCallback($id);
-            $this->editMessage($chatId, $messageId, $this->helpText(), $this->mainMenuKeyboard());
+            $this->api->answerCallback($id);
+            $this->api->editMessage($chatId, $messageId, $this->helpText(), $this->mainMenuKeyboard());
         } elseif ($action === 'traffic') {
-            $this->answerCallback($id, '正在刷新流量...');
+            $this->api->answerCallback($id, '正在刷新流量...');
             $this->refreshAllData();
-            $this->editMessage($chatId, $messageId, $this->buildTrafficText(), $this->trafficKeyboard());
+            $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), $this->trafficKeyboard());
             return;
         } elseif ($action === 'list') {
-            $this->answerCallback($id);
+            $this->api->answerCallback($id);
             $page = max(1, (int) ($parts[2] ?? 1));
-            $this->editMessage($chatId, $messageId, $this->buildInstancesText($page), $this->instancesKeyboard($page));
+            $this->api->editMessage($chatId, $messageId, $this->buildInstancesText($page), $this->instancesKeyboard($page));
         } elseif ($action === 'listrefresh') {
-            $this->answerCallback($id, '正在刷新列表...');
+            $this->api->answerCallback($id, '正在刷新列表...');
             $page = max(1, (int) ($parts[2] ?? 1));
             $this->refreshAllData();
-            $this->editMessage($chatId, $messageId, $this->buildInstancesText($page), $this->instancesKeyboard($page));
+            $this->api->editMessage($chatId, $messageId, $this->buildInstancesText($page), $this->instancesKeyboard($page));
             return;
         } elseif ($action === 'inst') {
-            $this->answerCallback($id);
+            $this->api->answerCallback($id);
             $accountId = (int) ($parts[2] ?? 0);
-            $this->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
+            $this->api->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
         } elseif ($action === 'refresh') {
-            $this->answerCallback($id, '正在刷新状态...');
+            $this->api->answerCallback($id, '正在刷新状态...');
             $accountId = (int) ($parts[2] ?? 0);
             if ($accountId > 0) {
                 $this->app->refreshAccount($accountId);
             }
-            $this->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
+            $this->api->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
             return;
         } elseif ($action === 'refreshall') {
-            $this->answerCallback($id, '正在同步数据...');
+            $this->api->answerCallback($id, '正在同步数据...');
             $this->refreshAllData();
-            $this->editMessage($chatId, $messageId, $this->buildTrafficText(), $this->trafficKeyboard());
+            $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), $this->trafficKeyboard());
             return;
         } elseif ($action === 'start') {
-            $this->answerCallback($id, '正在提交开机指令...');
+            $this->api->answerCallback($id, '正在提交开机指令...');
             $accountId = (int) ($parts[2] ?? 0);
             $this->startInstance($chatId, $messageId, $accountId);
             return;
         } elseif ($action === 'stop') {
-            $this->answerCallback($id, '正在提交停机指令...');
+            $this->api->answerCallback($id, '正在提交停机指令...');
             $accountId = (int) ($parts[2] ?? 0);
             $this->stopInstance($chatId, $messageId, $accountId);
             return;
         } elseif ($action === 'release') {
-            $this->answerCallback($id);
+            $this->api->answerCallback($id);
             $accountId = (int) ($parts[2] ?? 0);
             if (!$this->findInstance($accountId)) {
-                $this->editMessage($chatId, $messageId, "释放失败：实例不存在或已被清理。", $this->mainMenuKeyboard());
+                $this->api->editMessage($chatId, $messageId, "释放失败：实例不存在或已被清理。", $this->mainMenuKeyboard());
                 return;
             }
             $token = $this->createActionToken($userId, $chatId, 'release', $accountId);
-            $this->editMessage($chatId, $messageId, $this->buildReleaseConfirmText($accountId), $this->releaseConfirmKeyboard($token, $accountId));
+            $this->api->editMessage($chatId, $messageId, $this->buildReleaseConfirmText($accountId), $this->releaseConfirmKeyboard($token, $accountId));
         } elseif ($action === 'confirm') {
-            $this->answerCallback($id, '正在提交释放指令...');
+            $this->api->answerCallback($id, '正在提交释放指令...');
             $token = (string) ($parts[2] ?? '');
             $this->confirmRelease($chatId, $messageId, $userId, $token);
             return;
         } elseif ($action === 'cancel') {
-            $this->answerCallback($id);
+            $this->api->answerCallback($id);
             $token = (string) ($parts[2] ?? '');
             $this->useActionToken($token, $userId, $chatId, false);
-            $this->editMessage($chatId, $messageId, "已取消释放操作。", $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, "已取消释放操作。", $this->mainMenuKeyboard());
         } else {
-            $this->answerCallback($id);
+            $this->api->answerCallback($id);
         }
     }
 
@@ -473,18 +475,18 @@ class TelegramControlService
     {
         $inst = $this->findInstance($accountId);
         if (!$inst) {
-            $this->editMessage($chatId, $messageId, "❌ 开机失败：实例不存在。", $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, "❌ 开机失败：实例不存在。", $this->mainMenuKeyboard());
             return;
         }
 
         if (($inst['instanceStatus'] ?? '') !== 'Stopped') {
-            $this->editMessage($chatId, $messageId, "ℹ️ 当前实例不是已停机状态，无需开机。", $this->instanceKeyboard($accountId));
+            $this->api->editMessage($chatId, $messageId, "ℹ️ 当前实例不是已停机状态，无需开机。", $this->instanceKeyboard($accountId));
             return;
         }
 
         $success = $this->app->controlInstanceAction($accountId, 'start', 'KeepCharging', false);
         $this->db->addLog($success ? 'info' : 'error', "Telegram 控制开机" . ($success ? '成功' : '失败') . " [{$inst['remark']}] {$inst['instanceId']}");
-        $this->editMessage(
+        $this->api->editMessage(
             $chatId,
             $messageId,
             $success ? "🚀 开机指令已提交。\n\n🖥️ 实例：" . ($inst['remark'] ?: $inst['instanceId']) . "\n🟡 当前状态：启动中" : "❌ 开机失败，请查看系统日志。",
@@ -496,18 +498,18 @@ class TelegramControlService
     {
         $inst = $this->findInstance($accountId);
         if (!$inst) {
-            $this->editMessage($chatId, $messageId, "❌ 停机失败：实例不存在。", $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, "❌ 停机失败：实例不存在。", $this->mainMenuKeyboard());
             return;
         }
 
         if (($inst['instanceStatus'] ?? '') !== 'Running') {
-            $this->editMessage($chatId, $messageId, "ℹ️ 当前实例不是运行中状态，无需停机。", $this->instanceKeyboard($accountId));
+            $this->api->editMessage($chatId, $messageId, "ℹ️ 当前实例不是运行中状态，无需停机。", $this->instanceKeyboard($accountId));
             return;
         }
 
         $success = $this->app->controlInstanceAction($accountId, 'stop', 'KeepCharging', false);
         $this->db->addLog($success ? 'info' : 'error', "Telegram 控制停机" . ($success ? '成功' : '失败') . " [{$inst['remark']}] {$inst['instanceId']}");
-        $this->editMessage(
+        $this->api->editMessage(
             $chatId,
             $messageId,
             $success ? "🛑 停机指令已提交。\n\n🖥️ 实例：" . ($inst['remark'] ?: $inst['instanceId']) . "\n🟠 当前状态：停机中" : "❌ 停机失败，请查看系统日志。",
@@ -519,7 +521,7 @@ class TelegramControlService
     {
         $record = $this->useActionToken($token, $userId, $chatId, true);
         if (!$record) {
-            $this->editMessage($chatId, $messageId, "⏱️ 释放确认已失效，请重新发起释放操作。", $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, "⏱️ 释放确认已失效，请重新发起释放操作。", $this->mainMenuKeyboard());
             return;
         }
 
@@ -528,7 +530,7 @@ class TelegramControlService
         $success = $this->app->deleteInstanceAction($accountId);
         $label = $inst ? ($inst['remark'] ?: $inst['instanceId']) : ('实例 #' . $accountId);
         $this->db->addLog($success ? 'warning' : 'error', "Telegram 提交释放" . ($success ? '成功' : '失败') . " [{$label}]");
-        $this->editMessage(
+        $this->api->editMessage(
             $chatId,
             $messageId,
             $success
@@ -628,96 +630,9 @@ class TelegramControlService
         $stmt->execute([$key, $value]);
     }
 
-    private function sendMessage($chatId, $text, array $keyboard = null)
-    {
-        $payload = [
-            'chat_id' => $chatId,
-            'text' => $text
-        ];
-        if ($keyboard) {
-            $payload['reply_markup'] = json_encode($keyboard, JSON_UNESCAPED_UNICODE);
-        }
-        return $this->api('sendMessage', $payload);
-    }
 
-    private function editMessage($chatId, $messageId, $text, array $keyboard = null)
-    {
-        if ($messageId <= 0) {
-            return $this->sendMessage($chatId, $text, $keyboard);
-        }
 
-        $payload = [
-            'chat_id' => $chatId,
-            'message_id' => $messageId,
-            'text' => $text
-        ];
-        if ($keyboard) {
-            $payload['reply_markup'] = json_encode($keyboard, JSON_UNESCAPED_UNICODE);
-        }
-        $response = $this->api('editMessageText', $payload);
-        if (!$response['ok']) {
-            return $this->sendMessage($chatId, $text, $keyboard);
-        }
-        return $response;
-    }
 
-    private function answerCallback($callbackId, $text = '')
-    {
-        if ($callbackId === '') {
-            return;
-        }
-        $payload = ['callback_query_id' => $callbackId];
-        if ($text !== '') {
-            $payload['text'] = $text;
-        }
-        $this->api('answerCallbackQuery', $payload);
-    }
-
-    private function api($method, array $payload = [])
-    {
-        $token = trim((string) ($this->settings['notify_tg_token'] ?? ''));
-        $proxyType = $this->settings['notify_tg_proxy_type'] ?? 'none';
-        $url = "https://api.telegram.org/bot{$token}/{$method}";
-        if ($proxyType === 'custom' && !empty($this->settings['notify_tg_proxy_url'])) {
-            $url = rtrim($this->settings['notify_tg_proxy_url'], '/') . "/bot{$token}/{$method}";
-        }
-
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($payload));
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 8);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-
-        if ($proxyType === 'socks5') {
-            $proxyIp = trim((string) ($this->settings['notify_tg_proxy_ip'] ?? ''));
-            $proxyPort = trim((string) ($this->settings['notify_tg_proxy_port'] ?? ''));
-            if ($proxyIp !== '' && $proxyPort !== '') {
-                curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
-                curl_setopt($ch, CURLOPT_PROXY, "{$proxyIp}:{$proxyPort}");
-                $proxyUser = $this->settings['notify_tg_proxy_user'] ?? '';
-                $proxyPass = $this->settings['notify_tg_proxy_pass'] ?? '';
-                if ($proxyUser !== '' || $proxyPass !== '') {
-                    curl_setopt($ch, CURLOPT_PROXYUSERPWD, "{$proxyUser}:{$proxyPass}");
-                }
-            }
-        }
-
-        $raw = curl_exec($ch);
-        $error = curl_error($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($error) {
-            return ['ok' => false, 'description' => '网络请求错误: ' . $error];
-        }
-
-        $decoded = json_decode((string) $raw, true);
-        if (!is_array($decoded)) {
-            return ['ok' => false, 'description' => "接口返回异常 {$httpCode}: " . (string) $raw];
-        }
-        return $decoded;
-    }
 
     private function confirmTtl()
     {
