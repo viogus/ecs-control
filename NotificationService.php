@@ -17,29 +17,15 @@ class NotificationService
      */
     public function notifySchedule($actionType, $account, $description = "")
     {
-        $title = "定时任务: " . $actionType;
         $maskedKey = substr($account['access_key_id'], 0, 7) . '***';
-        $traffic = isset($account['traffic_used']) ? $this->formatTraffic((float) $account['traffic_used']) : '暂无';
-        $threshold = $this->config['traffic_threshold'] ?? 95;
-
-        $details = [
+        return $this->notify("定时任务: " . $actionType, "您的实例已执行{$actionType}操作", [
             ['label' => '账号', 'value' => $maskedKey],
             ['label' => '执行动作', 'value' => $actionType, 'highlight' => true],
             ['label' => '执行时间', 'value' => date('Y-m-d H:i:s')],
-            ['label' => '当前流量', 'value' => $traffic],
-            ['label' => '设定阈值', 'value' => $threshold . '%'],
+            ['label' => '当前流量', 'value' => isset($account['traffic_used']) ? $this->formatTraffic((float) $account['traffic_used']) : '暂无'],
+            ['label' => '设定阈值', 'value' => ($this->config['traffic_threshold'] ?? 95) . '%'],
             ['label' => '详情说明', 'value' => $description ?: '根据预设时间表自动执行。']
-        ];
-
-        $textMsg = "【ECS 服务器管家】{$title}\n" .
-            "账号: {$maskedKey}\n" .
-            "执行动作: {$actionType}\n" .
-            "当前流量: {$traffic}\n" .
-            "设定阈值: {$threshold}%\n" .
-            "执行时间: " . date('Y-m-d H:i:s') . "\n" .
-            "详情说明: " . ($description ?: '根据预设时间表自动执行。');
-
-        return $this->dispatchNotifications($title, "您的实例已执行{$actionType}操作", $details, 'info', $textMsg, $account['access_key_id']);
+        ], 'info', $account['access_key_id']);
     }
 
     /**
@@ -48,181 +34,89 @@ class NotificationService
      */
     public function sendTrafficWarning($accessKeyId, $traffic, $percentage, $statusText, $threshold)
     {
-        $title = "流量告警 - " . $statusText;
         $trafficText = $this->formatTraffic((float) $traffic);
-        $details = [
+        return $this->notify("流量告警 - " . $statusText, "检测到流量异常或达到阈值", [
             ['label' => '账号', 'value' => substr($accessKeyId, 0, 7) . '***'],
             ['label' => '当前流量', 'value' => $trafficText],
             ['label' => '使用率', 'value' => $percentage . '%', 'highlight' => true],
             ['label' => '设定阈值', 'value' => $threshold . '%'],
             ['label' => '当前状态', 'value' => $statusText]
-        ];
-
-        $textMsg = "【ECS 服务器管家】{$title}\n" .
-            "账号: " . substr($accessKeyId, 0, 7) . '***' . "\n" .
-            "当前流量: {$trafficText}\n" .
-            "使用率: {$percentage}%\n" .
-            "设定阈值: {$threshold}%\n" .
-            "当前状态: {$statusText}";
-
-        return $this->dispatchNotifications($title, "检测到流量异常或达到阈值", $details, 'warning', $textMsg, $accessKeyId);
+        ], 'warning', $accessKeyId);
     }
 
     public function notifyCredentialInvalid($accessKeyId, $traffic, $percentage, $threshold)
     {
-        $title = "流量告警 - 账号密钥已失效";
         $trafficText = $this->formatTraffic((float) $traffic);
-        $maskedAccount = substr($accessKeyId, 0, 7) . '***';
-        $statusText = '检测到 AK 已失效，已暂停自动停机';
-        $details = [
-            ['label' => '账号', 'value' => $maskedAccount],
+        return $this->notify("流量告警 - 账号密钥已失效", "检测到账号密钥失效，已暂停自动停机保护", [
+            ['label' => '账号', 'value' => substr($accessKeyId, 0, 7) . '***'],
             ['label' => '当前流量', 'value' => $trafficText],
             ['label' => '使用率', 'value' => $percentage . '%', 'highlight' => true],
             ['label' => '设定阈值', 'value' => $threshold . '%'],
-            ['label' => '当前状态', 'value' => $statusText],
+            ['label' => '当前状态', 'value' => '检测到 AK 已失效，已暂停自动停机'],
             ['label' => '处理建议', 'value' => '请更新 AK 后再恢复自动停机保护。']
-        ];
-
-        $textMsg = "【ECS 服务器管家】{$title}\n" .
-            "账号: {$maskedAccount}\n" .
-            "当前流量: {$trafficText}\n" .
-            "使用率: {$percentage}%\n" .
-            "设定阈值: {$threshold}%\n" .
-            "当前状态: {$statusText}\n" .
-            "处理建议: 请更新 AK 后再恢复自动停机保护。";
-
-        return $this->dispatchNotifications($title, "检测到账号密钥失效，已暂停自动停机保护，避免重复失败通知。", $details, 'warning', $textMsg, $accessKeyId);
+        ], 'warning', $accessKeyId);
     }
 
     public function notifyEcsCreated($accountLabel, array $result, array $preview = [])
     {
-        $title = 'ECS 创建并启动成功';
-        $instanceId = $result['instanceId'] ?? '';
-        $publicIp = $result['publicIp'] ?? '';
-        $loginUser = $result['loginUser'] ?? '';
-        $loginPassword = $result['loginPassword'] ?? '';
-        $regionId = $preview['regionId'] ?? '';
-        $instanceType = $preview['instanceType'] ?? ($result['instanceType'] ?? '');
-        $instanceName = $preview['instanceName'] ?? ($result['instanceName'] ?? '');
-
-        $details = [
+        return $this->notify('ECS 创建并启动成功', '实例已创建并启动，请立即保存一次性登录密码。', [
             ['label' => '账号', 'value' => $accountLabel],
-            ['label' => '实例名称', 'value' => $instanceName ?: '-'],
-            ['label' => '实例编号', 'value' => $instanceId ?: '-', 'highlight' => true],
-            ['label' => '区域', 'value' => $regionId ?: '-'],
-            ['label' => '实例规格', 'value' => $instanceType ?: '-'],
-            ['label' => '公网地址', 'value' => $publicIp ?: '等待阿里云分配'],
-            ['label' => '登录用户', 'value' => $loginUser ?: '-'],
-            ['label' => '初始密码', 'value' => $loginPassword ?: '-', 'highlight' => true],
+            ['label' => '实例名称', 'value' => ($preview['instanceName'] ?? $result['instanceName'] ?? '') ?: '-'],
+            ['label' => '实例编号', 'value' => ($result['instanceId'] ?? '') ?: '-', 'highlight' => true],
+            ['label' => '区域', 'value' => ($preview['regionId'] ?? '') ?: '-'],
+            ['label' => '实例规格', 'value' => ($preview['instanceType'] ?? $result['instanceType'] ?? '') ?: '-'],
+            ['label' => '公网地址', 'value' => ($result['publicIp'] ?? '') ?: '等待阿里云分配'],
+            ['label' => '登录用户', 'value' => ($result['loginUser'] ?? '') ?: '-'],
+            ['label' => '初始密码', 'value' => ($result['loginPassword'] ?? '') ?: '-', 'highlight' => true],
             ['label' => '安全提醒', 'value' => '初始密码仅在本次创建完成通知和控制台弹窗展示，请立即保存。']
-        ];
-
-        $textMsg = "【ECS 服务器管家】ECS 创建并启动成功\n" .
-            "账号: {$accountLabel}\n" .
-            "实例名称: " . ($instanceName ?: '-') . "\n" .
-            "实例编号: " . ($instanceId ?: '-') . "\n" .
-            "区域: " . ($regionId ?: '-') . "\n" .
-            "规格: " . ($instanceType ?: '-') . "\n" .
-            "公网地址: " . ($publicIp ?: '等待阿里云分配') . "\n" .
-            "登录用户: " . ($loginUser ?: '-') . "\n" .
-            "初始密码: " . ($loginPassword ?: '-') . "\n" .
-            "安全提醒: 初始密码仅在本次创建完成通知和控制台弹窗展示，请立即保存。";
-
-        return $this->dispatchNotifications($title, '实例已创建并启动，请立即保存一次性登录密码。', $details, 'success', $textMsg, $accountLabel);
+        ], 'success', $accountLabel);
     }
 
     public function notifyInstanceStatusChanged($accountLabel, array $account, $fromStatus, $toStatus, $reason = '')
     {
         $fromLabel = $this->statusLabel($fromStatus);
         $toLabel = $this->statusLabel($toStatus);
-        $instanceName = $account['instance_name'] ?? ($account['remark'] ?? '');
-        $instanceId = $account['instance_id'] ?? '';
-        $region = $account['region_id'] ?? '';
         $title = $toStatus === 'Running' ? '实例已启动' : ($toStatus === 'Stopped' ? '实例已停机' : "实例状态变化 - {$toLabel}");
-
-        $details = [
+        $instanceName = $account['instance_name'] ?? ($account['remark'] ?? '');
+        return $this->notify($title, '实例已进入最终状态', [
             ['label' => '账号', 'value' => $accountLabel],
             ['label' => '实例名称', 'value' => $instanceName ?: '-'],
-            ['label' => '实例编号', 'value' => $instanceId ?: '-', 'highlight' => true],
-            ['label' => '区域', 'value' => $region ?: '-'],
+            ['label' => '实例编号', 'value' => ($account['instance_id'] ?? '') ?: '-', 'highlight' => true],
+            ['label' => '区域', 'value' => ($account['region_id'] ?? '') ?: '-'],
             ['label' => '原状态', 'value' => $fromLabel],
             ['label' => '新状态', 'value' => $toLabel, 'highlight' => true],
             ['label' => '变化时间', 'value' => date('Y-m-d H:i:s')],
             ['label' => '说明', 'value' => $reason ?: '系统检测到实例运行状态发生变化。']
-        ];
-
-        $textMsg = "【ECS 服务器管家】{$title}\n" .
-            "账号: {$accountLabel}\n" .
-            "实例名称: " . ($instanceName ?: '-') . "\n" .
-            "实例编号: " . ($instanceId ?: '-') . "\n" .
-            "区域: " . ($region ?: '-') . "\n" .
-            "原状态: {$fromLabel}\n" .
-            "新状态: {$toLabel}\n" .
-            "变化时间: " . date('Y-m-d H:i:s') . "\n" .
-            "说明: " . ($reason ?: '系统检测到实例运行状态发生变化。');
-
-        return $this->dispatchNotifications($title, '实例已进入最终状态', $details, 'success', $textMsg, $accountLabel);
+        ], 'success', $accountLabel);
     }
 
     public function notifyInstanceReleased($accountLabel, array $account, $reason = '')
     {
         $instanceName = $account['instance_name'] ?? ($account['remark'] ?? '');
-        $instanceId = $account['instance_id'] ?? '';
-        $region = $account['region_id'] ?? '';
-        $publicIp = $account['public_ip'] ?? '';
-        $title = '实例已释放';
-
-        $details = [
+        return $this->notify('实例已释放', '实例已释放，本地记录和 DDNS 解析将同步清理。', [
             ['label' => '账号', 'value' => $accountLabel],
             ['label' => '实例名称', 'value' => $instanceName ?: '-'],
-            ['label' => '实例编号', 'value' => $instanceId ?: '-', 'highlight' => true],
-            ['label' => '区域', 'value' => $region ?: '-'],
-            ['label' => '公网地址', 'value' => $publicIp ?: '-'],
+            ['label' => '实例编号', 'value' => ($account['instance_id'] ?? '') ?: '-', 'highlight' => true],
+            ['label' => '区域', 'value' => ($account['region_id'] ?? '') ?: '-'],
+            ['label' => '公网地址', 'value' => ($account['public_ip'] ?? '') ?: '-'],
             ['label' => '释放时间', 'value' => date('Y-m-d H:i:s')],
             ['label' => '说明', 'value' => $reason ?: '实例已从 ECS 控制台释放，本地记录和 DDNS 解析将同步清理。']
-        ];
-
-        $textMsg = "【ECS 服务器管家】实例已释放\n" .
-            "账号: {$accountLabel}\n" .
-            "实例名称: " . ($instanceName ?: '-') . "\n" .
-            "实例编号: " . ($instanceId ?: '-') . "\n" .
-            "区域: " . ($region ?: '-') . "\n" .
-            "公网地址: " . ($publicIp ?: '-') . "\n" .
-            "释放时间: " . date('Y-m-d H:i:s') . "\n" .
-            "说明: " . ($reason ?: '实例已从 ECS 控制台释放，本地记录和 DDNS 解析将同步清理。');
-
-        return $this->dispatchNotifications($title, '实例已释放，本地记录和 DDNS 解析将同步清理。', $details, 'warning', $textMsg, $accountLabel);
+        ], 'warning', $accountLabel);
     }
 
     public function notifyPublicIpChanged($accountLabel, array $account, $oldIp, $newIp, $reason = '')
     {
         $instanceName = $account['instance_name'] ?? ($account['remark'] ?? '');
-        $instanceId = $account['instance_id'] ?? '';
-        $region = $account['region_id'] ?? '';
-        $title = '公网 IP 已更换';
-
-        $details = [
+        return $this->notify('公网 IP 已更换', '公网 IP 已成功更换，DDNS 解析已同步更新。', [
             ['label' => '账号', 'value' => $accountLabel],
             ['label' => '实例名称', 'value' => $instanceName ?: '-'],
-            ['label' => '实例编号', 'value' => $instanceId ?: '-', 'highlight' => true],
-            ['label' => '区域', 'value' => $region ?: '-'],
+            ['label' => '实例编号', 'value' => ($account['instance_id'] ?? '') ?: '-', 'highlight' => true],
+            ['label' => '区域', 'value' => ($account['region_id'] ?? '') ?: '-'],
             ['label' => '原公网 IP', 'value' => $oldIp ?: '-'],
             ['label' => '新公网 IP', 'value' => $newIp ?: '-', 'highlight' => true],
             ['label' => '变更时间', 'value' => date('Y-m-d H:i:s')],
             ['label' => '说明', 'value' => $reason ?: '系统已更换托管 EIP，并同步更新 DDNS 解析。']
-        ];
-
-        $textMsg = "【ECS 服务器管家】公网 IP 已更换\n" .
-            "账号: {$accountLabel}\n" .
-            "实例名称: " . ($instanceName ?: '-') . "\n" .
-            "实例编号: " . ($instanceId ?: '-') . "\n" .
-            "区域: " . ($region ?: '-') . "\n" .
-            "原公网 IP: " . ($oldIp ?: '-') . "\n" .
-            "新公网 IP: " . ($newIp ?: '-') . "\n" .
-            "变更时间: " . date('Y-m-d H:i:s') . "\n" .
-            "说明: " . ($reason ?: '系统已更换托管 EIP，并同步更新 DDNS 解析。');
-
-        return $this->dispatchNotifications($title, '公网 IP 已成功更换，DDNS 解析已同步更新。', $details, 'success', $textMsg, $accountLabel);
+        ], 'success', $accountLabel);
     }
 
     private function statusLabel($status)
@@ -266,6 +160,15 @@ class NotificationService
             ['label' => '设定阈值', 'value' => $threshold . '%']
         ];
         return $this->sendWebhook($textMsg, "测试推送", $summary, $details, 'test_account_id', $data);
+    }
+
+    private function notify(string $title, string $summary, array $details, string $type, string $accountId = ''): bool|string
+    {
+        $lines = ["【ECS 服务器管家】{$title}"];
+        foreach ($details as $d) {
+            $lines[] = "{$d['label']}: {$d['value']}";
+        }
+        return $this->dispatchNotifications($title, $summary, $details, $type, implode("\n", $lines), $accountId);
     }
 
     private function dispatchNotifications($title, $summary, $details, $type, $textMsg, $accountId = '')

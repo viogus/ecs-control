@@ -43,244 +43,7 @@ class MonitorService
         $accounts = $this->configManager->getAccounts();
 
         foreach ($accounts as $account) {
-            $accountLabel = $this->getAccountLogLabel($account);
-            $logPrefix = "[{$accountLabel}]";
-            $accountGroupKey = $account['group_key'] ?: substr(sha1(($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? '')), 0, 16);
-            $actions = [];
-            $protectionSuspended = !empty($account['protection_suspended']);
-            $protectionSuspendReason = trim((string) ($account['protection_suspend_reason'] ?? ''));
-            $protectionSuspendNotifiedAt = (int) ($account['protection_suspend_notified_at'] ?? 0);
-
-            // 1. 自适应心跳
-            $lastUpdate = $account['updated_at'] ?? 0;
-            $cachedStatus = $account['instance_status'] ?? 'Unknown';
-            $isTransientState = in_array($cachedStatus, ['Starting', 'Stopping', 'Pending', 'Unknown']);
-            $currentInterval = $isTransientState ? 60 : $userInterval;
-
-            $shouldCheckApi = ($currentTime - $lastUpdate) > $currentInterval;
-
-            if (date('i') === '00') {
-                $shouldCheckApi = true;
-            }
-
-            $newUpdateTime = $currentTime;
-
-            if ($shouldCheckApi) {
-                $trafficResult = $this->safeGetTraffic($account);
-                $status = $this->safeGetInstanceStatus($account);
-
-                if ($status === 'Unknown') {
-                    usleep(500000);
-                    $status = $this->safeGetInstanceStatus($account);
-                }
-
-                $metadata = [
-                    'traffic_api_status' => $trafficResult['status'] ?? 'ok',
-                    'traffic_api_message' => $trafficResult['message'] ?? ''
-                ];
-                $authInvalid = $this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '');
-
-                if ($authInvalid) {
-                    $metadata['protection_suspended'] = 1;
-                    $metadata['protection_suspend_reason'] = 'credential_invalid';
-                    $metadata['protection_suspend_notified_at'] = $protectionSuspendNotifiedAt;
-                    $protectionSuspended = true;
-                    $protectionSuspendReason = 'credential_invalid';
-                } elseif ($protectionSuspended && $protectionSuspendReason === 'credential_invalid') {
-                    $metadata['protection_suspended'] = 0;
-                    $metadata['protection_suspend_reason'] = '';
-                    $metadata['protection_suspend_notified_at'] = 0;
-                    $protectionSuspended = false;
-                    $protectionSuspendReason = '';
-                    $protectionSuspendNotifiedAt = 0;
-                    $this->db->addLog('info', "账号鉴权已恢复，自动停机保护已重新启用 [{$accountLabel}]");
-                }
-
-                if (empty($trafficResult['success'])) {
-                    $traffic = $account['traffic_used'];
-                    $apiStatusLog = "流量接口异常";
-                    $newUpdateTime = $lastUpdate;
-                } else {
-                    $traffic = (float) ($trafficResult['value'] ?? 0);
-                    $apiStatusLog = "已更新";
-
-                    $this->db->addHourlyStat($account['id'], $traffic);
-                    $this->db->addDailyStat($account['id'], $traffic);
-                }
-
-                if ($status === 'Unknown') {
-                    $newUpdateTime = $lastUpdate;
-                    $apiStatusLog .= "(状态Unknown)";
-                } else {
-                    $apiStatusLog .= in_array($status, ['Starting', 'Stopping', 'Pending']) ? " [过渡态]" : " [稳定态]";
-                }
-
-                $this->notifyStatusChangeIfNeeded($account, $cachedStatus, $status, '系统同步检测到实例状态变化。');
-                $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $newUpdateTime, $metadata);
-            } else {
-                $traffic = $account['traffic_used'];
-                $status = $account['instance_status'];
-                $timeLeft = $currentInterval - ($currentTime - $lastUpdate);
-                $apiStatusLog = "缓存({$timeLeft}s)";
-            }
-
-            $maxTraffic = $account['max_traffic'];
-            $accountTraffic = $this->getGroupTrafficUsed($account);
-            $usagePercent = ($maxTraffic > 0) ? round(($accountTraffic / $maxTraffic) * 100, 2) : 0;
-            $trafficDesc = "账号出口流量:{$usagePercent}%";
-            $isOverThreshold = $usagePercent >= $threshold;
-            $isHardLimitExceeded = $maxTraffic > 0 && $accountTraffic >= $maxTraffic;
-            $requiresTrafficProtection = $isOverThreshold || $isHardLimitExceeded;
-            $scheduleBlockedByTraffic = !empty($account['schedule_blocked_by_traffic']);
-
-            // 2. 流量熔断
-            if ($requiresTrafficProtection) {
-                $trafficDesc .= $isHardLimitExceeded ? "[已超出上限]" : "[接近上限]";
-
-                if ($thresholdAction === 'stop_and_notify') {
-                    if ($protectionSuspended && $protectionSuspendReason === 'credential_invalid') {
-                        if ($protectionSuspendNotifiedAt <= 0) {
-                            $actions[] = "账号密钥失效，已暂停自动停机";
-                            $notifyResult = $this->notificationService->notifyCredentialInvalid($accountLabel, $accountTraffic, $usagePercent, $threshold);
-                            $this->logNotificationResult($notifyResult, $accountLabel);
-                            $this->db->addLog('warning', "检测到账号鉴权失效，已暂停自动停机保护 [{$accountLabel}] 当前使用率:{$usagePercent}%");
-                            $protectionSuspendNotifiedAt = $currentTime;
-                            $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $lastUpdate, [
-                                'protection_suspended' => 1,
-                                'protection_suspend_reason' => 'credential_invalid',
-                                'protection_suspend_notified_at' => $protectionSuspendNotifiedAt
-                            ]);
-                        } else {
-                            $apiStatusLog .= " [鉴权失效,已暂停自动停机]";
-                        }
-                    } else {
-                        $canAttemptStop = !in_array($status, ['Stopped', 'Stopping', 'Released'], true);
-
-                        // 达到账号流量上限后必须立即保护，不再等待下一次接口刷新窗口。
-                        if ($canAttemptStop) {
-                            if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
-                                $previousStatus = $status;
-                                $actions[] = $isHardLimitExceeded ? "已超量自动停机" : "接近上限自动停机";
-                                $this->db->addLog('warning', "账号出口流量达到保护线，已自动停机 [{$accountLabel}] 当前使用率:{$usagePercent}%");
-                                $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
-                                $this->configManager->updateScheduleBlockedByTrafficForGroup($accountGroupKey, true);
-                                $this->notifyStatusChangeIfNeeded($account, $previousStatus, 'Stopping', '流量达到保护线，已自动停机。');
-                                $status = 'Stopping';
-                                $scheduleBlockedByTraffic = true;
-                            } else {
-                                $actions[] = "自动停机失败";
-                                $this->db->addLog('error', "账号出口流量达到保护线，但自动停机失败 [{$accountLabel}] 当前使用率:{$usagePercent}%");
-                            }
-                        }
-                    }
-                } elseif ($shouldCheckApi) {
-                    $actions[] = "超量提醒";
-                    $this->db->addLog('warning', "账号出口流量超限触发提醒 [{$accountLabel}] 当前使用率:{$usagePercent}%");
-                }
-
-                if (!empty($actions) && !($protectionSuspended && $protectionSuspendReason === 'credential_invalid')) {
-                    $mailRes = $this->notificationService->sendTrafficWarning($accountLabel, $accountTraffic, $usagePercent, implode(',', $actions), $threshold);
-                    $this->logNotificationResult($mailRes, $accountLabel);
-                }
-            }
-
-            // 3. 定时开关机：本月一旦触发流量保护就暂停，月初重置或手动恢复后才重新接入。
-            $scheduleEnabled = !empty($account['schedule_enabled']);
-            $scheduleStartEnabled = !empty($account['schedule_start_enabled']);
-            $scheduleStopEnabled = !empty($account['schedule_stop_enabled']);
-            $startTime = trim((string) ($account['start_time'] ?? ''));
-            $stopTime = trim((string) ($account['stop_time'] ?? ''));
-            $today = date('Y-m-d', $currentTime);
-
-            $scheduleAllowed = $scheduleEnabled && !$scheduleBlockedByTraffic && !$requiresTrafficProtection;
-            $isStableState = !in_array($status, ['Starting', 'Stopping', 'Pending', 'Releasing', 'Released'], true);
-
-            if ($scheduleAllowed && $scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account['schedule_last_stop_date'] ?? '')) {
-                if ($isStableState && $status === 'Running') {
-                    if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
-                        $actions[] = "定时停机";
-                        $this->db->addLog('info', "执行定时停机 [{$accountLabel}] {$stopTime}");
-                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
-                        $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
-                        $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
-                        $this->logNotificationResult($scheduleNotify, $accountLabel);
-                        $this->notifyStatusChangeIfNeeded($account, 'Running', 'Stopping', '已按计划执行定时停机。');
-                        $status = 'Stopping';
-                    } else {
-                        $apiStatusLog .= " [定时停机失败]";
-                    }
-                } else {
-                    $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
-                }
-            }
-
-            if ($scheduleAllowed && $scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account['schedule_last_start_date'] ?? '')) {
-                if ($isStableState && $status === 'Stopped') {
-                    if ($this->safeControlInstance($account, 'start')) {
-                        $actions[] = "定时开机";
-                        $this->db->addLog('info', "执行定时开机 [{$accountLabel}] {$startTime}");
-                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
-                        $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
-                        $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
-                        $this->logNotificationResult($scheduleNotify, $accountLabel);
-                        $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
-                        $this->ddnsService->syncForAccounts([$account], '定时开机后');
-                        $status = 'Starting';
-                    } else {
-                        $apiStatusLog .= " [定时开机失败]";
-                    }
-                } else {
-                    $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
-                }
-            }
-
-            // 4. 每月自动开机：只在每月 1 号执行，且不会启动已触发流量保护或被流量熔断封锁的实例。
-            $autoStartBlocked = !empty($account['auto_start_blocked']);
-            if ($monthlyAutoStart && !$autoStartBlocked && !$requiresTrafficProtection && !$scheduleBlockedByTraffic && date('j', $currentTime) === '1') {
-                $lastMonthlyStart = (int) ($account['last_keep_alive_at'] ?? 0);
-                if ($status === 'Stopped' && !$this->isSameMonth($lastMonthlyStart, $currentTime)) {
-                    if ($this->safeControlInstance($account, 'start')) {
-                        $actions[] = "月初自动开机";
-                        $this->db->addLog('info', "执行月初自动开机 [{$accountLabel}]");
-                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
-                        $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
-                        $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '每月 1 号自动开机已执行。');
-                        $this->ddnsService->syncForAccounts([$account], '月初自动开机后');
-                        $status = 'Starting';
-                    } else {
-                        $apiStatusLog .= " [月初自动开机失败,下次重试]";
-                    }
-                }
-            }
-
-            // 5. 保活逻辑
-            if ($keepAlive && !$autoStartBlocked && !$requiresTrafficProtection) {
-                if ($status === 'Stopped') {
-                    if ($this->safeControlInstance($account, 'start')) {
-                        $actions[] = "保活启动";
-                        $this->db->addLog('info', "执行保活启动 [{$accountLabel}]");
-
-                        $mailRes = $this->notificationService->notifySchedule("保活启动", $account, "检测到实例非预期关机，已尝试自动启动。");
-                        $this->logNotificationResult($mailRes, $accountLabel);
-
-                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
-                        $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
-                        $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '检测到实例非预期关机，保活已尝试自动启动。');
-                        $this->ddnsService->syncForAccounts([$account], '保活启动后');
-                        $status = 'Starting';
-                    } else {
-                        $apiStatusLog .= " [保活启动失败,下次重试]";
-                    }
-                }
-            }
-
-
-            $actionLog = empty($actions) ? "无动作" : implode(", ", $actions);
-            $logLine = sprintf("%s %s | %s | %s | %s", $logPrefix, $actionLog, $trafficDesc, $status, $apiStatusLog);
-
-            // --- 修改：将心跳日志写入数据库 ---
-            $this->db->addLog('heartbeat', $logLine);
-            $logs[] = $logLine;
+            $this->processAccount($account, $currentTime, $threshold, $shutdownMode, $thresholdAction, $keepAlive, $monthlyAutoStart, $userInterval, $logs);
         }
 
         $this->configManager->updateLastRunTime(time());
@@ -573,4 +336,246 @@ class MonitorService
         return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
     }
 
+    private function processAccount(array $account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, bool $keepAlive, bool $monthlyAutoStart, int $userInterval, array &$logs): void
+    {
+            $accountLabel = $this->getAccountLogLabel($account);
+            $logPrefix = "[{$accountLabel}]";
+            $accountGroupKey = $account['group_key'] ?: substr(sha1(($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? '')), 0, 16);
+            $actions = [];
+            $protectionSuspended = !empty($account['protection_suspended']);
+            $protectionSuspendReason = trim((string) ($account['protection_suspend_reason'] ?? ''));
+            $protectionSuspendNotifiedAt = (int) ($account['protection_suspend_notified_at'] ?? 0);
+
+            // 1. 自适应心跳
+            $lastUpdate = $account['updated_at'] ?? 0;
+            $cachedStatus = $account['instance_status'] ?? 'Unknown';
+            $isTransientState = in_array($cachedStatus, ['Starting', 'Stopping', 'Pending', 'Unknown']);
+            $currentInterval = $isTransientState ? 60 : $userInterval;
+
+            $shouldCheckApi = ($currentTime - $lastUpdate) > $currentInterval;
+
+            if (date('i') === '00') {
+                $shouldCheckApi = true;
+            }
+
+            $newUpdateTime = $currentTime;
+
+            if ($shouldCheckApi) {
+                $trafficResult = $this->safeGetTraffic($account);
+                $status = $this->safeGetInstanceStatus($account);
+
+                if ($status === 'Unknown') {
+                    usleep(500000);
+                    $status = $this->safeGetInstanceStatus($account);
+                }
+
+                $metadata = [
+                    'traffic_api_status' => $trafficResult['status'] ?? 'ok',
+                    'traffic_api_message' => $trafficResult['message'] ?? ''
+                ];
+                $authInvalid = $this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '');
+
+                if ($authInvalid) {
+                    $metadata['protection_suspended'] = 1;
+                    $metadata['protection_suspend_reason'] = 'credential_invalid';
+                    $metadata['protection_suspend_notified_at'] = $protectionSuspendNotifiedAt;
+                    $protectionSuspended = true;
+                    $protectionSuspendReason = 'credential_invalid';
+                } elseif ($protectionSuspended && $protectionSuspendReason === 'credential_invalid') {
+                    $metadata['protection_suspended'] = 0;
+                    $metadata['protection_suspend_reason'] = '';
+                    $metadata['protection_suspend_notified_at'] = 0;
+                    $protectionSuspended = false;
+                    $protectionSuspendReason = '';
+                    $protectionSuspendNotifiedAt = 0;
+                    $this->db->addLog('info', "账号鉴权已恢复，自动停机保护已重新启用 [{$accountLabel}]");
+                }
+
+                if (empty($trafficResult['success'])) {
+                    $traffic = $account['traffic_used'];
+                    $apiStatusLog = "流量接口异常";
+                    $newUpdateTime = $lastUpdate;
+                } else {
+                    $traffic = (float) ($trafficResult['value'] ?? 0);
+                    $apiStatusLog = "已更新";
+
+                    $this->db->addHourlyStat($account['id'], $traffic);
+                    $this->db->addDailyStat($account['id'], $traffic);
+                }
+
+                if ($status === 'Unknown') {
+                    $newUpdateTime = $lastUpdate;
+                    $apiStatusLog .= "(状态Unknown)";
+                } else {
+                    $apiStatusLog .= in_array($status, ['Starting', 'Stopping', 'Pending']) ? " [过渡态]" : " [稳定态]";
+                }
+
+                $this->notifyStatusChangeIfNeeded($account, $cachedStatus, $status, '系统同步检测到实例状态变化。');
+                $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $newUpdateTime, $metadata);
+            } else {
+                $traffic = $account['traffic_used'];
+                $status = $account['instance_status'];
+                $timeLeft = $currentInterval - ($currentTime - $lastUpdate);
+                $apiStatusLog = "缓存({$timeLeft}s)";
+            }
+
+            $maxTraffic = $account['max_traffic'];
+            $accountTraffic = $this->getGroupTrafficUsed($account);
+            $usagePercent = ($maxTraffic > 0) ? round(($accountTraffic / $maxTraffic) * 100, 2) : 0;
+            $trafficDesc = "账号出口流量:{$usagePercent}%";
+            $isOverThreshold = $usagePercent >= $threshold;
+            $isHardLimitExceeded = $maxTraffic > 0 && $accountTraffic >= $maxTraffic;
+            $requiresTrafficProtection = $isOverThreshold || $isHardLimitExceeded;
+            $scheduleBlockedByTraffic = !empty($account['schedule_blocked_by_traffic']);
+
+            // 2. 流量熔断
+            if ($requiresTrafficProtection) {
+                $trafficDesc .= $isHardLimitExceeded ? "[已超出上限]" : "[接近上限]";
+
+                if ($thresholdAction === 'stop_and_notify') {
+                    if ($protectionSuspended && $protectionSuspendReason === 'credential_invalid') {
+                        if ($protectionSuspendNotifiedAt <= 0) {
+                            $actions[] = "账号密钥失效，已暂停自动停机";
+                            $notifyResult = $this->notificationService->notifyCredentialInvalid($accountLabel, $accountTraffic, $usagePercent, $threshold);
+                            $this->logNotificationResult($notifyResult, $accountLabel);
+                            $this->db->addLog('warning', "检测到账号鉴权失效，已暂停自动停机保护 [{$accountLabel}] 当前使用率:{$usagePercent}%");
+                            $protectionSuspendNotifiedAt = $currentTime;
+                            $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $lastUpdate, [
+                                'protection_suspended' => 1,
+                                'protection_suspend_reason' => 'credential_invalid',
+                                'protection_suspend_notified_at' => $protectionSuspendNotifiedAt
+                            ]);
+                        } else {
+                            $apiStatusLog .= " [鉴权失效,已暂停自动停机]";
+                        }
+                    } else {
+                        $canAttemptStop = !in_array($status, ['Stopped', 'Stopping', 'Released'], true);
+
+                        // 达到账号流量上限后必须立即保护，不再等待下一次接口刷新窗口。
+                        if ($canAttemptStop) {
+                            if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
+                                $previousStatus = $status;
+                                $actions[] = $isHardLimitExceeded ? "已超量自动停机" : "接近上限自动停机";
+                                $this->db->addLog('warning', "账号出口流量达到保护线，已自动停机 [{$accountLabel}] 当前使用率:{$usagePercent}%");
+                                $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
+                                $this->configManager->updateScheduleBlockedByTrafficForGroup($accountGroupKey, true);
+                                $this->notifyStatusChangeIfNeeded($account, $previousStatus, 'Stopping', '流量达到保护线，已自动停机。');
+                                $status = 'Stopping';
+                                $scheduleBlockedByTraffic = true;
+                            } else {
+                                $actions[] = "自动停机失败";
+                                $this->db->addLog('error', "账号出口流量达到保护线，但自动停机失败 [{$accountLabel}] 当前使用率:{$usagePercent}%");
+                            }
+                        }
+                    }
+                } elseif ($shouldCheckApi) {
+                    $actions[] = "超量提醒";
+                    $this->db->addLog('warning', "账号出口流量超限触发提醒 [{$accountLabel}] 当前使用率:{$usagePercent}%");
+                }
+
+                if (!empty($actions) && !($protectionSuspended && $protectionSuspendReason === 'credential_invalid')) {
+                    $mailRes = $this->notificationService->sendTrafficWarning($accountLabel, $accountTraffic, $usagePercent, implode(',', $actions), $threshold);
+                    $this->logNotificationResult($mailRes, $accountLabel);
+                }
+            }
+
+            // 3. 定时开关机：本月一旦触发流量保护就暂停，月初重置或手动恢复后才重新接入。
+            $scheduleEnabled = !empty($account['schedule_enabled']);
+            $scheduleStartEnabled = !empty($account['schedule_start_enabled']);
+            $scheduleStopEnabled = !empty($account['schedule_stop_enabled']);
+            $startTime = trim((string) ($account['start_time'] ?? ''));
+            $stopTime = trim((string) ($account['stop_time'] ?? ''));
+            $today = date('Y-m-d', $currentTime);
+
+            $scheduleAllowed = $scheduleEnabled && !$scheduleBlockedByTraffic && !$requiresTrafficProtection;
+            $isStableState = !in_array($status, ['Starting', 'Stopping', 'Pending', 'Releasing', 'Released'], true);
+
+            if ($scheduleAllowed && $scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account['schedule_last_stop_date'] ?? '')) {
+                if ($isStableState && $status === 'Running') {
+                    if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
+                        $actions[] = "定时停机";
+                        $this->db->addLog('info', "执行定时停机 [{$accountLabel}] {$stopTime}");
+                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
+                        $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                        $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
+                        $this->logNotificationResult($scheduleNotify, $accountLabel);
+                        $this->notifyStatusChangeIfNeeded($account, 'Running', 'Stopping', '已按计划执行定时停机。');
+                        $status = 'Stopping';
+                    } else {
+                        $apiStatusLog .= " [定时停机失败]";
+                    }
+                } else {
+                    $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                }
+            }
+
+            if ($scheduleAllowed && $scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account['schedule_last_start_date'] ?? '')) {
+                if ($isStableState && $status === 'Stopped') {
+                    if ($this->safeControlInstance($account, 'start')) {
+                        $actions[] = "定时开机";
+                        $this->db->addLog('info', "执行定时开机 [{$accountLabel}] {$startTime}");
+                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
+                        $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                        $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
+                        $this->logNotificationResult($scheduleNotify, $accountLabel);
+                        $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
+                        $this->ddnsService->syncForAccounts([$account], '定时开机后');
+                        $status = 'Starting';
+                    } else {
+                        $apiStatusLog .= " [定时开机失败]";
+                    }
+                } else {
+                    $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                }
+            }
+
+            // 4. 每月自动开机：只在每月 1 号执行，且不会启动已触发流量保护或被流量熔断封锁的实例。
+            $autoStartBlocked = !empty($account['auto_start_blocked']);
+            if ($monthlyAutoStart && !$autoStartBlocked && !$requiresTrafficProtection && !$scheduleBlockedByTraffic && date('j', $currentTime) === '1') {
+                $lastMonthlyStart = (int) ($account['last_keep_alive_at'] ?? 0);
+                if ($status === 'Stopped' && !$this->isSameMonth($lastMonthlyStart, $currentTime)) {
+                    if ($this->safeControlInstance($account, 'start')) {
+                        $actions[] = "月初自动开机";
+                        $this->db->addLog('info', "执行月初自动开机 [{$accountLabel}]");
+                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
+                        $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
+                        $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '每月 1 号自动开机已执行。');
+                        $this->ddnsService->syncForAccounts([$account], '月初自动开机后');
+                        $status = 'Starting';
+                    } else {
+                        $apiStatusLog .= " [月初自动开机失败,下次重试]";
+                    }
+                }
+            }
+
+            // 5. 保活逻辑
+            if ($keepAlive && !$autoStartBlocked && !$requiresTrafficProtection) {
+                if ($status === 'Stopped') {
+                    if ($this->safeControlInstance($account, 'start')) {
+                        $actions[] = "保活启动";
+                        $this->db->addLog('info', "执行保活启动 [{$accountLabel}]");
+
+                        $mailRes = $this->notificationService->notifySchedule("保活启动", $account, "检测到实例非预期关机，已尝试自动启动。");
+                        $this->logNotificationResult($mailRes, $accountLabel);
+
+                        $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
+                        $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
+                        $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '检测到实例非预期关机，保活已尝试自动启动。');
+                        $this->ddnsService->syncForAccounts([$account], '保活启动后');
+                        $status = 'Starting';
+                    } else {
+                        $apiStatusLog .= " [保活启动失败,下次重试]";
+                    }
+                }
+            }
+
+
+            $actionLog = empty($actions) ? "无动作" : implode(", ", $actions);
+            $logLine = sprintf("%s %s | %s | %s | %s", $logPrefix, $actionLog, $trafficDesc, $status, $apiStatusLog);
+
+            // --- 修改：将心跳日志写入数据库 ---
+            $this->db->addLog('heartbeat', $logLine);
+            $logs[] = $logLine;
+        }
+    }
 }
