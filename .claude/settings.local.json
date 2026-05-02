@@ -18,7 +18,9 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(sed -n '1490,1494p' AliyunTrafficCheck.php)",
-      "Bash(sed -n '1525,1532p' AliyunTrafficCheck.php)"
+      "Bash(sed -n '1525,1532p' AliyunTrafficCheck.php)",
+      "Bash(sed -n '/function __construct/,/^    }$/p' Database.php)",
+      "Bash(sed -n '/function init/,/^    }$/p' src/SchemaManager.php)"
     ]
   }
 }
