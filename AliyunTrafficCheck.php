@@ -53,6 +53,16 @@ class AliyunTrafficCheck
         return $this->initError;
     }
 
+    public function getDb(): Database
+    {
+        return $this->db;
+    }
+
+    public function getConfigManager(): ConfigManager
+    {
+        return $this->configManager;
+    }
+
     public function isInitialized()
     {
         if ($this->initError)

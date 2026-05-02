@@ -10,15 +10,8 @@ if (PHP_SAPI !== 'cli') {
 }
 
 $app = new AliyunTrafficCheck();
-$ref = new ReflectionClass($app);
-
-$dbProp = $ref->getProperty('db');
-$dbProp->setAccessible(true);
-$db = $dbProp->getValue($app);
-
-$configProp = $ref->getProperty('configManager');
-$configProp->setAccessible(true);
-$configManager = $configProp->getValue($app);
+$db = $app->getDb();
+$configManager = $app->getConfigManager();
 
 $service = new TelegramControlService($db, $configManager, $app);
 

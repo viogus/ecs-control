@@ -47,7 +47,6 @@ class MonitorService
             $logPrefix = "[{$accountLabel}]";
             $accountGroupKey = $account['group_key'] ?: substr(sha1(($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? '')), 0, 16);
             $actions = [];
-            $forceRefresh = false;
             $protectionSuspended = !empty($account['protection_suspended']);
             $protectionSuspendReason = trim((string) ($account['protection_suspend_reason'] ?? ''));
             $protectionSuspendNotifiedAt = (int) ($account['protection_suspend_notified_at'] ?? 0);
@@ -58,7 +57,7 @@ class MonitorService
             $isTransientState = in_array($cachedStatus, ['Starting', 'Stopping', 'Pending', 'Unknown']);
             $currentInterval = $isTransientState ? 60 : $userInterval;
 
-            $shouldCheckApi = $forceRefresh || (($currentTime - $lastUpdate) > $currentInterval);
+            $shouldCheckApi = ($currentTime - $lastUpdate) > $currentInterval;
 
             if (date('i') === '00') {
                 $shouldCheckApi = true;
