@@ -19,9 +19,6 @@ class MonitorService
 
     public function run(): string
     {
-        if ($this->initError)
-            return "错误: " . $this->initError;
-
         // 优化：分级清理日志
         // 普通/重要日志保留 30 天，高频心跳日志仅保留 3 天
         $this->db->pruneLogs(30, 3);
@@ -564,6 +561,17 @@ class MonitorService
             $this->db->addLog('error', "实例操作失败 [{$action}]: 无法连接接口");
             return false;
         }
+    }
+
+    private function getAccountLogLabel($account): string
+    {
+        $remark = trim((string) ($account['remark'] ?? ''));
+        if ($remark !== '') return $remark;
+        $name = trim((string) ($account['instance_name'] ?? ''));
+        if ($name !== '') return $name;
+        $id = trim((string) ($account['instance_id'] ?? ''));
+        if ($id !== '') return $id;
+        return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
     }
 
 }
