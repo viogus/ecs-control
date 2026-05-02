@@ -152,7 +152,7 @@ class FrontendResponseBuilder
     }
 
     public function buildInstanceSnapshot(
-        array $account,
+        $account,
         int $threshold,
         int $userInterval,
         bool $billingEnabled,

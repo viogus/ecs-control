@@ -72,7 +72,7 @@ class NotificationService
         ], 'success', $accountLabel);
     }
 
-    public function notifyInstanceStatusChanged($accountLabel, array $account, $fromStatus, $toStatus, $reason = '')
+    public function notifyInstanceStatusChanged($accountLabel, $account, $fromStatus, $toStatus, $reason = '')
     {
         $fromLabel = $this->statusLabel($fromStatus);
         $toLabel = $this->statusLabel($toStatus);
@@ -90,7 +90,7 @@ class NotificationService
         ], 'success', $accountLabel);
     }
 
-    public function notifyInstanceReleased($accountLabel, array $account, $reason = '')
+    public function notifyInstanceReleased($accountLabel, $account, $reason = '')
     {
         $instanceName = $account['instance_name'] ?? ($account['remark'] ?? '');
         return $this->notify('实例已释放', '实例已释放，本地记录和 DDNS 解析将同步清理。', [
@@ -104,7 +104,7 @@ class NotificationService
         ], 'warning', $accountLabel);
     }
 
-    public function notifyPublicIpChanged($accountLabel, array $account, $oldIp, $newIp, $reason = '')
+    public function notifyPublicIpChanged($accountLabel, $account, $oldIp, $newIp, $reason = '')
     {
         $instanceName = $account['instance_name'] ?? ($account['remark'] ?? '');
         return $this->notify('公网 IP 已更换', '公网 IP 已成功更换，DDNS 解析已同步更新。', [
