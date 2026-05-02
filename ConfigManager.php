@@ -18,62 +18,22 @@ class ConfigManager
 
     private function getEncryptionKey()
     {
-        $keyDir = __DIR__ . '/data';
-        $keyFile = $keyDir . '/.secret_encryption.key';
-
-        if (!is_dir($keyDir)) {
-            @mkdir($keyDir, 0755, true);
-        }
-
-        if (file_exists($keyFile)) {
-            $key = file_get_contents($keyFile);
-            if ($key !== false && strlen($key) === SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
-                return $key;
-            }
-
-            // 密钥文件存在但内容异常：抛出明确错误，避免静默覆盖导致所有已加密数据永久不可解密。
-            $actual = is_string($key) ? strlen($key) : 'false';
-            $expected = SODIUM_CRYPTO_SECRETBOX_KEYBYTES;
-            throw new Exception(
-                "加密密钥文件 {$keyFile} 异常（期望 {$expected} 字节，实际 {$actual}）。" .
-                "请从备份恢复密钥文件后重试，或删除该文件重新初始化（将丢失所有已加密的 AK Secret）。"
-            );
-        }
-
-        $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-        file_put_contents($keyFile, $key, LOCK_EX);
-        @chmod($keyFile, 0600);
-        return $key;
+        return EncryptionManager::loadKey();
     }
 
     private function encryptValue($value)
     {
-        if (!function_exists('sodium_crypto_secretbox') || empty($value)) {
-            return $value;
-        }
-        $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        $encrypted = sodium_crypto_secretbox($value, $nonce, $this->encryptionKey);
-        return 'ENC1' . base64_encode($nonce . $encrypted);
+        return EncryptionManager::encrypt($value, $this->encryptionKey);
     }
 
     private function decryptValue($value)
     {
-        if (!function_exists('sodium_crypto_secretbox') || empty($value) || strlen($value) < 8 || substr($value, 0, 4) !== 'ENC1') {
-            return $value;
-        }
-        $raw = base64_decode(substr($value, 4));
-        if ($raw === false) {
-            return $value;
-        }
-        $nonce = substr($raw, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        $ciphertext = substr($raw, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        $decrypted = sodium_crypto_secretbox_open($ciphertext, $nonce, $this->encryptionKey);
-        return $decrypted !== false ? $decrypted : $value;
+        return EncryptionManager::decrypt($value, $this->encryptionKey);
     }
 
     private function isEncryptedValue($value)
     {
-        return strlen($value) >= 8 && substr($value, 0, 4) === 'ENC1';
+        return EncryptionManager::isEncrypted($value);
     }
 
     public function load()
