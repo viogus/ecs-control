@@ -32,7 +32,7 @@ class InstanceActionService
         try {
             $result = $this->aliyunService->controlInstance($targetAccount, $action, $shutdownMode);
             if ($result) {
-                $this->db->addLog('info', "实例操作 [{$action}] 成功 [{$this->getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']}");
+                $this->db->addLog('info', "实例操作 [{$action}] 成功 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']}");
                 $newStatus = $action === 'stop' ? 'Stopping' : 'Starting';
                 $this->configManager->updateAccountStatus($accountId, $targetAccount['traffic_used'], $newStatus, time());
                 $this->configManager->updateAutoStartBlocked($accountId, $action === 'stop');
@@ -60,7 +60,7 @@ class InstanceActionService
         $targetAccount = $this->configManager->getAccountById($accountId);
         if (!$targetAccount) return false;
 
-        $this->db->addLog('warning', "操作成功：秒级标记释放指令已提交，后台安全队列正在接管 [{$this->getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']}");
+        $this->db->addLog('warning', "操作成功：秒级标记释放指令已提交，后台安全队列正在接管 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']}");
         $this->configManager->markAccountAsDeleted($accountId);
         return true;
     }
@@ -88,12 +88,12 @@ class InstanceActionService
 
             $this->syncDdnsForAccounts($this->configManager->getAccounts(), 'EIP 更换后');
             $newIp = $result['publicIp'] ?? '';
-            $this->db->addLog('info', "EIP 已更换 [{$this->getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']} {$oldIp} -> {$newIp}");
+            $this->db->addLog('info', "EIP 已更换 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']} {$oldIp} -> {$newIp}");
             $notifyResult = $this->notificationService->notifyPublicIpChanged(
-                $this->getAccountLogLabel($targetAccount), $targetAccount, $oldIp, $newIp,
+                Helpers::getAccountLogLabel($targetAccount), $targetAccount, $oldIp, $newIp,
                 '用户在控制台手动更换公网 IP，DDNS 解析已同步更新。'
             );
-            $this->logNotificationResult($notifyResult, $this->getAccountLogLabel($targetAccount));
+            Helpers::logNotificationResult($this->db, $notifyResult, Helpers::getAccountLogLabel($targetAccount));
 
             return ['success' => true, 'message' => '公网 IP 已更换',
                 'data' => [
@@ -103,7 +103,7 @@ class InstanceActionService
                     'internetMaxBandwidthOut' => $result['internetMaxBandwidthOut'] ?? 0
                 ]];
         } catch (\Exception $e) {
-            $this->db->addLog('error', "EIP 更换失败 [{$this->getAccountLogLabel($targetAccount)}]: " . strip_tags($e->getMessage()));
+            $this->db->addLog('error', "EIP 更换失败 [{Helpers::getAccountLogLabel($targetAccount)}]: " . strip_tags($e->getMessage()));
             return ['success' => false, 'message' => strip_tags($e->getMessage())];
         }
     }
@@ -163,7 +163,7 @@ class InstanceActionService
 
         $response = ['success' => true, 'traffic_status' => $trafficResult['status'] ?? 'ok', 'traffic_message' => $trafficResult['message'] ?? ''];
         if ($billingError) {
-            $this->db->addLog('warning', "账单刷新异常 [{$this->getAccountLogLabel($targetAccount)}]: {$billingError}");
+            $this->db->addLog('warning', "账单刷新异常 [{Helpers::getAccountLogLabel($targetAccount)}]: {$billingError}");
             $response['billing_error'] = $billingError;
         }
         return $response;
@@ -206,7 +206,7 @@ class InstanceActionService
     {
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
-            $accountLabel = $this->getAccountLogLabel($account);
+            $accountLabel = Helpers::getAccountLogLabel($account);
             try {
                 $status = $this->aliyunService->getInstanceStatus($account);
             } catch (\Exception $e) {
@@ -319,12 +319,12 @@ class InstanceActionService
                 $recordName = $this->buildDdnsRecordNameForAccount($account, $groupCounts);
                 $result = $this->ddnsService->syncARecord($recordName, $publicIp);
                 if (!empty($result['success']) && empty($result['skipped'])) {
-                    $this->db->addLog('info', "DDNS 已同步 [{$this->getAccountLogLabel($account)}] {$recordName} -> {$publicIp} ({$source})");
+                    $this->db->addLog('info', "DDNS 已同步 [{Helpers::getAccountLogLabel($account)}] {$recordName} -> {$publicIp} ({$source})");
                 } elseif (empty($result['success'])) {
-                    $this->db->addLog('warning', "DDNS 同步失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($result['message'] ?? '未知错误'));
+                    $this->db->addLog('warning', "DDNS 同步失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($result['message'] ?? '未知错误'));
                 }
             } catch (\Exception $e) {
-                $this->db->addLog('warning', "DDNS 同步失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+                $this->db->addLog('warning', "DDNS 同步失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
             }
         }
     }
@@ -348,7 +348,7 @@ class InstanceActionService
             $recordName = $this->buildDdnsRecordNameForAccount($account, $this->getDdnsGroupCounts($accountsBefore));
             $this->deleteDdnsRecord($recordName, $source);
         } catch (\Exception $e) {
-            $this->db->addLog('warning', "DDNS 清理失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+            $this->db->addLog('warning', "DDNS 清理失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
         }
     }
 
@@ -373,7 +373,7 @@ class InstanceActionService
         foreach ($accounts as $account) {
             if (empty($account['instance_id'])) continue;
             try { $records[$account['instance_id']] = $this->buildDdnsRecordNameForAccount($account, $groupCounts); }
-            catch (\Exception $e) { $this->db->addLog('warning', "DDNS 记录名生成失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage())); }
+            catch (\Exception $e) { $this->db->addLog('warning', "DDNS 记录名生成失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage())); }
         }
         return $records;
     }
@@ -425,23 +425,5 @@ class InstanceActionService
         return trim((string) ($account['public_ip'] ?? ''));
     }
 
-    private function getAccountLogLabel(array $account): string
-    {
-        $remark = trim((string) ($account['remark'] ?? ''));
-        if ($remark !== '') return $remark;
-        $name = trim((string) ($account['instance_name'] ?? ''));
-        if ($name !== '') return $name;
-        $id = trim((string) ($account['instance_id'] ?? ''));
-        if ($id !== '') return $id;
-        return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
-    }
 
-    private function logNotificationResult($result, string $key): void
-    {
-        if ($result === true) {
-            $this->db->addLog('info', "通知推送成功 [$key]");
-        } elseif ($result !== false && $result !== true) {
-            $this->db->addLog('warning', "通知推送异常/失败 [$key]: " . strip_tags($result));
-        }
-    }
 }

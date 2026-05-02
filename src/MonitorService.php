@@ -59,14 +59,6 @@ class MonitorService
 
         return implode(PHP_EOL, $logs);
     }
-    private function logNotificationResult($result, $key)
-    {
-        if ($result === true) {
-            $this->db->addLog('info', "通知推送成功 [$key]");
-        } elseif ($result !== false && $result !== true) {
-            $this->db->addLog('warning', "通知推送异常/失败 [$key]: " . strip_tags($result));
-        }
-    }
 
     private function notifyStatusChangeIfNeeded($account, $fromStatus, $toStatus, $reason = '')
     {
@@ -92,9 +84,9 @@ class MonitorService
         // 这时通常用户已经在界面看到了，或者已有操作成功的提示，可根据需要决定是否通知。
         // 这里保留过渡态到稳定态的通知，但过滤从一个稳定态快速切换到另一个稳定态（如通过脚本极速重启）时的中间干扰。
 
-        $accountLabel = $this->getAccountLogLabel($account);
+        $accountLabel = Helpers::getAccountLogLabel($account);
         $result = $this->notificationService->notifyInstanceStatusChanged($accountLabel, $account, $fromStatus, $toStatus, $reason);
-        $this->logNotificationResult($result, $accountLabel);
+        Helpers::logNotificationResult($this->db, $result, $accountLabel);
     }
 
     private function isRecentlyCreatedInstance(array $account)
@@ -159,39 +151,6 @@ class MonitorService
         return trim((string) $status) === 'auth_error';
     }
 
-    private function isCredentialInvalidError($code, $message = '')
-    {
-        $normalizedCode = strtolower(trim((string) $code));
-        $normalizedMessage = strtolower(trim((string) $message));
-        if ($normalizedCode === '') {
-            return false;
-        }
-
-        $credentialErrorCodes = [
-            'invalidaccesskeyid.notfound',
-            'invalidaccesskeyid',
-            'signaturedoesnotmatch',
-            'incompletesignature',
-            'forbidden.accesskeydisabled',
-            'invalidsecuritytoken.expired',
-            'invalidsecuritytoken.malformed',
-            'missingsecuritytoken'
-        ];
-
-        if (in_array($normalizedCode, $credentialErrorCodes, true)) {
-            return true;
-        }
-
-        if ($normalizedMessage === '') {
-            return false;
-        }
-
-        return strpos($normalizedMessage, 'access key is not found') !== false
-            || strpos($normalizedMessage, 'access key id does not exist') !== false
-            || strpos($normalizedMessage, 'signature does not match') !== false
-            || strpos($normalizedMessage, 'incomplete signature') !== false
-            || strpos($normalizedMessage, 'accesskeydisabled') !== false;
-    }
 
     private function safeGetTraffic($account)
     {
@@ -209,27 +168,27 @@ class MonitorService
             ];
         } catch (ClientException $e) {
             $code = trim((string) $e->getErrorCode());
-            if ($this->isCredentialInvalidError($code, $e->getMessage())) {
-                $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: AK 已失效");
+            if (Helpers::isCredentialInvalidError($code, $e->getMessage())) {
+                $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: AK 已失效");
                 return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
             }
-            $this->db->addLog('error', "CDT 流量查询配置错误 [{$this->getAccountLogLabel($account)}]: " . ($code ?: "鉴权失败") . "，请确认 AK 拥有 CDT 权限");
+            $this->db->addLog('error', "CDT 流量查询配置错误 [{Helpers::getAccountLogLabel($account)}]: " . ($code ?: "鉴权失败") . "，请确认 AK 拥有 CDT 权限");
             return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => 'CDT 权限不足，请确认 AK 拥有 cdt:ListCdtInternetTraffic 权限'];
         } catch (ServerException $e) {
             $code = trim((string) $e->getErrorCode());
-            if ($this->isCredentialInvalidError($code, $e->getErrorMessage())) {
-                $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: {$code} - " . $e->getErrorMessage());
+            if (Helpers::isCredentialInvalidError($code, $e->getErrorMessage())) {
+                $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: {$code} - " . $e->getErrorMessage());
                 return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
             }
-            $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: " . $e->getErrorCode() . " - " . $e->getErrorMessage());
+            $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: " . $e->getErrorCode() . " - " . $e->getErrorMessage());
             return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => 'CDT 接口异常'];
         } catch (\Exception $e) {
             if (strpos($e->getMessage(), 'cURL error') !== false) {
-                $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: 网络连接超时");
+                $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: 网络连接超时");
                 return ['success' => false, 'value' => null, 'status' => 'timeout', 'message' => 'CDT 请求超时'];
             }
 
-            $this->db->addLog('error', "CDT 流量查询失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+            $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
             return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => 'CDT 流量同步失败'];
         }
     }
@@ -325,20 +284,10 @@ class MonitorService
         }
     }
 
-    private function getAccountLogLabel($account): string
-    {
-        $remark = trim((string) ($account['remark'] ?? ''));
-        if ($remark !== '') return $remark;
-        $name = trim((string) ($account['instance_name'] ?? ''));
-        if ($name !== '') return $name;
-        $id = trim((string) ($account['instance_id'] ?? ''));
-        if ($id !== '') return $id;
-        return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
-    }
 
     private function processAccount(array $account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, bool $keepAlive, bool $monthlyAutoStart, int $userInterval, array &$logs): void
     {
-            $accountLabel = $this->getAccountLogLabel($account);
+            $accountLabel = Helpers::getAccountLogLabel($account);
             $logPrefix = "[{$accountLabel}]";
             $accountGroupKey = $account['group_key'] ?: substr(sha1(($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? '')), 0, 16);
             $actions = [];
@@ -437,7 +386,7 @@ class MonitorService
                         if ($protectionSuspendNotifiedAt <= 0) {
                             $actions[] = "账号密钥失效，已暂停自动停机";
                             $notifyResult = $this->notificationService->notifyCredentialInvalid($accountLabel, $accountTraffic, $usagePercent, $threshold);
-                            $this->logNotificationResult($notifyResult, $accountLabel);
+                            Helpers::logNotificationResult($this->db, $notifyResult, $accountLabel);
                             $this->db->addLog('warning', "检测到账号鉴权失效，已暂停自动停机保护 [{$accountLabel}] 当前使用率:{$usagePercent}%");
                             $protectionSuspendNotifiedAt = $currentTime;
                             $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $lastUpdate, [
@@ -475,7 +424,7 @@ class MonitorService
 
                 if (!empty($actions) && !($protectionSuspended && $protectionSuspendReason === 'credential_invalid')) {
                     $mailRes = $this->notificationService->sendTrafficWarning($accountLabel, $accountTraffic, $usagePercent, implode(',', $actions), $threshold);
-                    $this->logNotificationResult($mailRes, $accountLabel);
+                    Helpers::logNotificationResult($this->db, $mailRes, $accountLabel);
                 }
             }
 
@@ -498,7 +447,7 @@ class MonitorService
                         $this->configManager->updateAccountStatus($account['id'], $traffic, 'Stopping', $currentTime);
                         $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
                         $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
-                        $this->logNotificationResult($scheduleNotify, $accountLabel);
+                        Helpers::logNotificationResult($this->db, $scheduleNotify, $accountLabel);
                         $this->notifyStatusChangeIfNeeded($account, 'Running', 'Stopping', '已按计划执行定时停机。');
                         $status = 'Stopping';
                     } else {
@@ -517,7 +466,7 @@ class MonitorService
                         $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
                         $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
                         $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
-                        $this->logNotificationResult($scheduleNotify, $accountLabel);
+                        Helpers::logNotificationResult($this->db, $scheduleNotify, $accountLabel);
                         $this->notifyStatusChangeIfNeeded($account, 'Stopped', 'Starting', '已按计划执行定时开机。');
                         $this->ddnsService->syncForAccounts([$account], '定时开机后');
                         $status = 'Starting';
@@ -556,7 +505,7 @@ class MonitorService
                         $this->db->addLog('info', "执行保活启动 [{$accountLabel}]");
 
                         $mailRes = $this->notificationService->notifySchedule("保活启动", $account, "检测到实例非预期关机，已尝试自动启动。");
-                        $this->logNotificationResult($mailRes, $accountLabel);
+                        Helpers::logNotificationResult($this->db, $mailRes, $accountLabel);
 
                         $this->configManager->updateAccountStatus($account['id'], $traffic, 'Starting', $currentTime);
                         $this->configManager->updateLastKeepAlive($account['id'], $currentTime);

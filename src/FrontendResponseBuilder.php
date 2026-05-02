@@ -223,7 +223,7 @@ class FrontendResponseBuilder
         $usagePercent = $maxTraffic > 0 ? round(($traffic / $maxTraffic) * 100, 2) : 0;
         $instanceName = $account['instance_name'] ?? '';
         $remark = $account['remark'] ?? '';
-        $accountDisplayLabel = $this->getAccountLogLabel($account);
+        $accountDisplayLabel = Helpers::getAccountLogLabel($account);
 
         $item = [
             'id' => (int) $account['id'],
@@ -272,16 +272,6 @@ class FrontendResponseBuilder
         return $item;
     }
 
-    private function getAccountLogLabel(array $account): string
-    {
-        $remark = trim((string) ($account['remark'] ?? ''));
-        if ($remark !== '') return $remark;
-        $instanceName = trim((string) ($account['instance_name'] ?? ''));
-        if ($instanceName !== '') return $instanceName;
-        $instanceId = trim((string) ($account['instance_id'] ?? ''));
-        if ($instanceId !== '') return $instanceId;
-        return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
-    }
 
     private function getRegionName($regionId): string
     {

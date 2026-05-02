@@ -141,25 +141,6 @@ class AliyunTrafficCheck
         return preg_match('/^\$2[aby]?\$/', $password) === 1 || preg_match('/^\$argon2[aid]\$/', $password) === 1;
     }
 
-    private function getAccountLogLabel($account)
-    {
-        $remark = trim((string) ($account['remark'] ?? ''));
-        if ($remark !== '') {
-            return $remark;
-        }
-
-        $instanceName = trim((string) ($account['instance_name'] ?? ''));
-        if ($instanceName !== '') {
-            return $instanceName;
-        }
-
-        $instanceId = trim((string) ($account['instance_id'] ?? ''));
-        if ($instanceId !== '') {
-            return $instanceId;
-        }
-
-        return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
-    }
 
     private function resolveSecretFromDatabase($accessKeyId, $regionId, $groupKey = '')
     {
@@ -302,7 +283,7 @@ class AliyunTrafficCheck
         $accessKeyMap = [];
 
         foreach ($accounts as $account) {
-            $label = $this->getAccountLogLabel($account);
+            $label = Helpers::getAccountLogLabel($account);
             $accessKeyId = trim((string) ($account['access_key_id'] ?? ''));
             if ($accessKeyId === '') {
                 continue;
@@ -640,9 +621,9 @@ class AliyunTrafficCheck
                 ]);
             }
             $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), "ECS 创建后");
-            $this->db->addLog('info', "一键创建 ECS成功 [{$this->getAccountLogLabel($account)}] {$result['instanceId']} {$preview['instanceType']} {$preview['regionId']} {$result['internetMaxBandwidthOut']}Mbps");
-            $notifyResult = $this->notificationService->notifyEcsCreated($this->getAccountLogLabel($account), $result, $preview);
-            $this->logNotificationResult($notifyResult, $this->getAccountLogLabel($account));
+            $this->db->addLog('info', "一键创建 ECS成功 [{Helpers::getAccountLogLabel($account)}] {$result['instanceId']} {$preview['instanceType']} {$preview['regionId']} {$result['internetMaxBandwidthOut']}Mbps");
+            $notifyResult = $this->notificationService->notifyEcsCreated(Helpers::getAccountLogLabel($account), $result, $preview);
+            Helpers::logNotificationResult($this->db, $notifyResult, Helpers::getAccountLogLabel($account));
 
             return [
                 'success' => true,
@@ -655,7 +636,7 @@ class AliyunTrafficCheck
                 'step' => '创建失败',
                 'error_message' => strip_tags($e->getMessage())
             ]);
-            $this->db->addLog('error', "一键创建 ECS 失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+            $this->db->addLog('error', "一键创建 ECS 失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
             throw $e;
         }
     }
@@ -890,7 +871,7 @@ class AliyunTrafficCheck
         $toStatus = (string) ($toStatus ?: 'Unknown');
         if ($fromStatus === $toStatus || !in_array($toStatus, ['Running', 'Stopped'], true)) return;
         if ($fromStatus === 'Unknown') return;
-        $accountLabel = $this->getAccountLogLabel($account);
+        $accountLabel = Helpers::getAccountLogLabel($account);
         $result = $this->notificationService->notifyInstanceStatusChanged($accountLabel, $account, $fromStatus, $toStatus, $reason);
         if ($result === true) {
             $this->db->addLog('info', "通知推送成功 [$accountLabel]");
