@@ -407,93 +407,8 @@ class AliyunTrafficCheck
 
     public function refreshAccount($id)
     {
-        if ($this->initError)
-            return false;
-
-        $targetAccount = $this->configManager->getAccountById($id);
-        if (!$targetAccount)
-            return false;
-
-        $currentTime = time();
-        $trafficResult = $this->safeGetTraffic($targetAccount);
-        $status = $this->safeGetInstanceStatus($targetAccount);
-        $metadata = [
-            'traffic_api_status' => $trafficResult['status'] ?? 'ok',
-            'traffic_api_message' => $trafficResult['message'] ?? ''
-        ];
-        if ($this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '')) {
-            $metadata['protection_suspended'] = 1;
-            $metadata['protection_suspend_reason'] = 'credential_invalid';
-        } else {
-            $metadata['protection_suspended'] = 0;
-            $metadata['protection_suspend_reason'] = '';
-            $metadata['protection_suspend_notified_at'] = 0;
-        }
-
-        if (empty($trafficResult['success'])) {
-            $traffic = $targetAccount['traffic_used'];
-        } else {
-            $traffic = (float) ($trafficResult['value'] ?? 0);
-            $this->db->addHourlyStat($targetAccount['id'], $traffic);
-            $this->db->addDailyStat($targetAccount['id'], $traffic);
-        }
-
-        $this->notifyStatusChangeIfNeeded($targetAccount, $targetAccount['instance_status'] ?? 'Unknown', $status, '手动同步检测到实例状态变化。');
-        $this->configManager->updateAccountStatus($id, $traffic, $status, $currentTime, $metadata);
-
-        // 刷新账单数据：仅在启用费用监控 且 无有效缓存时调用 费用中心 接口
-        $billingError = null;
-        $billingEnabled = $this->configManager->get('enable_billing', '0') === '1';
-        if ($billingEnabled) {
-            $billingCycle = date('Y-m');
-
-            // 余额：无有效缓存时重新获取
-            $balanceCache = $this->db->getBillingCache($targetAccount['id'], 'balance', '', 21600);
-            if (!$balanceCache) {
-                try {
-                    $balance = $this->aliyunService->getAccountBalance(
-                        $targetAccount['access_key_id'],
-                        $targetAccount['access_key_secret'],
-                        $targetAccount['site_type'] ?? 'china'
-                    );
-                    $this->db->setBillingCache($targetAccount['id'], 'balance', '', $balance);
-                } catch (\Exception $e) {
-                    $billingError = '余额查询失败: ' . $e->getMessage();
-                }
-            }
-
-            // 实例账单：无有效缓存时重新获取
-            if (!empty($targetAccount['instance_id'])) {
-                $billCache = $this->db->getBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, 21600);
-                if (!$billCache) {
-                    try {
-                        $bill = $this->aliyunService->getInstanceBill(
-                            $targetAccount['access_key_id'],
-                            $targetAccount['access_key_secret'],
-                            $targetAccount['instance_id'],
-                            $billingCycle,
-                            $targetAccount['site_type'] ?? 'china'
-                        );
-                        $this->db->setBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, $bill);
-                    } catch (\Exception $e) {
-                        $billingError = ($billingError ? $billingError . '; ' : '') . '账单查询失败: ' . $e->getMessage();
-                    }
-                }
-            }
-        }
-
-        $response = [
-            'success' => true,
-            'traffic_status' => $trafficResult['status'] ?? 'ok',
-            'traffic_message' => $trafficResult['message'] ?? ''
-        ];
-
-        if ($billingError) {
-            $this->db->addLog('warning', "账单刷新异常 [{$this->getAccountLogLabel($targetAccount)}]: {$billingError}");
-            $response['billing_error'] = $billingError;
-        }
-
-        return $response;
+        if ($this->initError) return false;
+        return $this->instanceActionService->refreshAccount($id);
     }
 
     public function fetchInstances($accessKeyId, $accessKeySecret, $regionId = '')
@@ -932,6 +847,36 @@ class AliyunTrafficCheck
         }
 
         return '';
+    }
+
+    public function controlInstanceAction($accountId, $action, $shutdownMode = 'KeepCharging', $waitForSync = true)
+    {
+        if ($this->initError) return false;
+        return $this->instanceActionService->controlInstance($accountId, $action, $shutdownMode, $waitForSync, [$this, 'notifyStatusChangeIfNeeded']);
+    }
+
+    public function deleteInstanceAction($accountId, $forceStop = false)
+    {
+        if ($this->initError) return false;
+        return $this->instanceActionService->deleteInstance($accountId);
+    }
+
+    public function replaceInstanceIpAction($accountId)
+    {
+        if ($this->initError) return ['success' => false, 'message' => $this->initError];
+        return $this->instanceActionService->replaceInstanceIp($accountId);
+    }
+
+    public function getAllManagedInstances($sync = false)
+    {
+        if ($this->initError) return [];
+        return $this->instanceActionService->getAllManagedInstances($sync, [$this->responseBuilder, 'buildInstanceSnapshot']);
+    }
+
+    public function getEcsCreateTask($taskId)
+    {
+        if ($this->initError) return null;
+        return $this->db->getEcsCreateTask($taskId);
     }
 
     public function sendTestEmail($to)

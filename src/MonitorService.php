@@ -298,11 +298,6 @@ class MonitorService
             $this->configManager->load();
         }
 
-        // 执行异步彻底销毁循环
-        $this->processPendingReleases();
-
-        $this->processTelegramControl();
-
         return implode(PHP_EOL, $logs);
     }
     private function logNotificationResult($result, $key)
@@ -570,43 +565,5 @@ class MonitorService
             return false;
         }
     }
-
-
-    public function controlInstanceAction($accountId, $action, $shutdownMode = 'KeepCharging', $waitForSync = true)
-    {
-        if ($this->initError) return false;
-        return $this->instanceActionService->controlInstance($accountId, $action, $shutdownMode, $waitForSync, [$this, 'notifyStatusChangeIfNeeded']);
-    }
-
-    public function deleteInstanceAction($accountId, $forceStop = false)
-    {
-        if ($this->initError) return false;
-        return $this->instanceActionService->deleteInstance($accountId);
-    }
-
-    public function replaceInstanceIpAction($accountId)
-    {
-        if ($this->initError) return ['success' => false, 'message' => $this->initError];
-        return $this->instanceActionService->replaceInstanceIp($accountId);
-    }
-
-    private function processPendingReleases()
-    {
-        $onReleased = function($label, $account) {
-            $notifyResult = $this->notificationService->notifyInstanceReleased(
-                $label, $account, '用户前端提交指令后，后台成功执行安全彻底销毁。'
-            );
-            $this->logNotificationResult($notifyResult, $label);
-        };
-        $this->instanceActionService->processPendingReleases($onReleased);
-    }
-
-    public function getAllManagedInstances($sync = false)
-    {
-        if ($this->initError) return [];
-        $buildSnapshot = [$this->responseBuilder, 'buildInstanceSnapshot'];
-        return $this->instanceActionService->getAllManagedInstances($sync, $buildSnapshot);
-    }
-
 
 }
