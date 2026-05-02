@@ -87,14 +87,15 @@ class ConfigManager
         $this->resetMonthlyTrafficCacheIfNeeded();
 
         $stmt = $this->db->query("SELECT * FROM accounts WHERE is_deleted = 0 ORDER BY region_id ASC, remark ASC, id ASC");
-        $this->accountsCache = $stmt->fetchAll();
-
-        foreach ($this->accountsCache as &$row) {
-            if (!empty($row['access_key_secret']) && $this->isEncryptedValue($row['access_key_secret'])) {
-                $row['access_key_secret'] = $this->decryptValue($row['access_key_secret']);
+        $rows = $stmt->fetchAll();
+        $this->accountsCache = [];
+        foreach ($rows as $row) {
+            $secret = $row['access_key_secret'] ?? '';
+            if (!empty($secret) && $this->isEncryptedValue($secret)) {
+                $secret = $this->decryptValue($secret);
             }
+            $this->accountsCache[] = Account::fromDbRow($row, $secret);
         }
-        unset($row);
     }
 
     private function resetMonthlyTrafficCacheIfNeeded()
@@ -144,7 +145,7 @@ class ConfigManager
     public function getAccountById($id)
     {
         foreach ($this->accountsCache as $acc) {
-            if ((int) $acc['id'] === (int) $id) {
+            if ($acc->id === (int) $id) {
                 return $acc;
             }
         }
@@ -154,7 +155,7 @@ class ConfigManager
     public function getAccountByInstanceId($instanceId)
     {
         foreach ($this->accountsCache as $acc) {
-            if (($acc['instance_id'] ?? '') === $instanceId) {
+            if ($acc->instanceId === $instanceId) {
                 return $acc;
             }
         }
