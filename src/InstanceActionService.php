@@ -44,7 +44,7 @@ class InstanceActionService
                     if (($syncedAccount['instance_status'] ?? '') === 'Running' && $onStatusChanged) {
                         $onStatusChanged($syncedAccount, $targetAccount['instance_status'] ?? 'Unknown', 'Running', '用户手动启动成功。');
                     }
-                    $this->syncDdnsForAccounts($this->configManager->getAccounts(), '实例启动后');
+                    $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), '实例启动后');
                 }
             }
             return true;
@@ -86,7 +86,7 @@ class InstanceActionService
                 'internet_max_bandwidth_out' => $result['internetMaxBandwidthOut'] ?? ($targetAccount['internet_max_bandwidth_out'] ?? 0)
             ]);
 
-            $this->syncDdnsForAccounts($this->configManager->getAccounts(), 'EIP 更换后');
+            $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), 'EIP 更换后');
             $newIp = $result['publicIp'] ?? '';
             $this->db->addLog('info', "EIP 已更换 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']} {$oldIp} -> {$newIp}");
             $notifyResult = $this->notificationService->notifyPublicIpChanged(
@@ -175,7 +175,7 @@ class InstanceActionService
             $accountsBefore = $this->configManager->getAccounts();
             $this->configManager->syncAccountGroups(true);
             $this->configManager->load();
-            $this->reconcileDdnsAfterAccountSync($accountsBefore, $this->configManager->getAccounts(), '实例手动同步');
+            $this->ddnsService->reconcileAfterSync($accountsBefore, $this->configManager->getAccounts(), '实例手动同步');
         } else {
             $this->configManager->load();
         }
@@ -226,17 +226,17 @@ class InstanceActionService
                         $this->db->addLog('warning', "后台异步彻底销毁成功 [{$accountLabel}] {$account['instance_id']}");
                         if ($onReleased) $onReleased($accountLabel, $account);
                         $accountsBeforeDelete = $this->configManager->getAccounts();
-                        $this->deleteDdnsForAccount($account, $accountsBeforeDelete, '后台实例彻底释放');
+                        $this->ddnsService->deleteForAccount($account, $accountsBeforeDelete, '后台实例彻底释放');
                         $this->configManager->physicallyDeleteAccount($account['id']);
-                        $this->reconcileDdnsAfterAccountSync($accountsBeforeDelete, $this->configManager->getAccounts(), '异步释放后同步');
+                        $this->ddnsService->reconcileAfterSync($accountsBeforeDelete, $this->configManager->getAccounts(), '异步释放后同步');
                     }
                 } elseif ($status === 'NotFound') {
                     if (!$this->releaseManagedEipForPendingAccount($account, $accountLabel)) continue;
                     $this->db->addLog('warning', "待释放实例云端已灭迹，自动擦除本地账本 [{$accountLabel}]");
                     $accountsBeforeDelete = $this->configManager->getAccounts();
-                    $this->deleteDdnsForAccount($account, $accountsBeforeDelete, '实例已灭迹后清理');
+                    $this->ddnsService->deleteForAccount($account, $accountsBeforeDelete, '实例已灭迹后清理');
                     $this->configManager->physicallyDeleteAccount($account['id']);
-                    $this->reconcileDdnsAfterAccountSync($accountsBeforeDelete, $this->configManager->getAccounts(), '实例灭迹后同步');
+                    $this->ddnsService->reconcileAfterSync($accountsBeforeDelete, $this->configManager->getAccounts(), '实例灭迹后同步');
                 } elseif ($status === 'Unknown') {
                     $this->db->addLog('warning', "后台异步释放引擎暂时无法确认实例状态，将于下一轮重试 [{$accountLabel}]");
                 } elseif (!in_array($status, ['Stopping'])) {
@@ -292,123 +292,3 @@ class InstanceActionService
     }
 
     // ---- DDNS helpers (will be refactored out later) ----
-
-    private function syncDdnsForAccounts(array $accounts, string $source = '同步'): void
-    {
-        if (!$this->ddnsService || !$this->ddnsService->isEnabled()) return;
-        $groupCounts = $this->getDdnsGroupCounts($accounts);
-        foreach ($accounts as $account) {
-            $publicIp = $this->getEffectivePublicIp($account);
-            if (empty($account['instance_id']) || $publicIp === '') continue;
-            try {
-                $recordName = $this->buildDdnsRecordNameForAccount($account, $groupCounts);
-                $result = $this->ddnsService->syncARecord($recordName, $publicIp);
-                if (!empty($result['success']) && empty($result['skipped'])) {
-                    $this->db->addLog('info', "DDNS 已同步 [{Helpers::getAccountLogLabel($account)}] {$recordName} -> {$publicIp} ({$source})");
-                } elseif (empty($result['success'])) {
-                    $this->db->addLog('warning', "DDNS 同步失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($result['message'] ?? '未知错误'));
-                }
-            } catch (\Exception $e) {
-                $this->db->addLog('warning', "DDNS 同步失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
-            }
-        }
-    }
-
-    private function reconcileDdnsAfterAccountSync(array $before, array $after, string $source = '同步'): void
-    {
-        if (!$this->ddnsService || !$this->ddnsService->isEnabled()) return;
-        $beforeRecords = $this->getDdnsRecordNamesForAccounts($before);
-        $afterRecords = $this->getDdnsRecordNamesForAccounts($after);
-        foreach ($beforeRecords as $instanceId => $recordName) {
-            if ($recordName === '' || in_array($recordName, $afterRecords, true)) continue;
-            $this->deleteDdnsRecord($recordName, $source . '清理');
-        }
-        $this->syncDdnsForAccounts($after, $source);
-    }
-
-    private function deleteDdnsForAccount($account, array $accountsBefore, string $source = '释放'): void
-    {
-        if (!$this->ddnsService || !$this->ddnsService->isEnabled()) return;
-        try {
-            $recordName = $this->buildDdnsRecordNameForAccount($account, $this->getDdnsGroupCounts($accountsBefore));
-            $this->deleteDdnsRecord($recordName, $source);
-        } catch (\Exception $e) {
-            $this->db->addLog('warning', "DDNS 清理失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
-        }
-    }
-
-    private function deleteDdnsRecord(string $recordName, string $source = '清理'): void
-    {
-        try {
-            $result = $this->ddnsService->deleteARecord($recordName);
-            if (!empty($result['success']) && empty($result['skipped'])) {
-                $this->db->addLog('info', "DDNS 已删除 {$recordName} ({$source})");
-            } elseif (empty($result['success'])) {
-                $this->db->addLog('warning', "DDNS 删除失败 {$recordName}: " . strip_tags($result['message'] ?? '未知错误'));
-            }
-        } catch (\Exception $e) {
-            $this->db->addLog('warning', "DDNS 删除失败 {$recordName}: " . strip_tags($e->getMessage()));
-        }
-    }
-
-    private function getDdnsRecordNamesForAccounts(array $accounts): array
-    {
-        $groupCounts = $this->getDdnsGroupCounts($accounts);
-        $records = [];
-        foreach ($accounts as $account) {
-            if (empty($account['instance_id'])) continue;
-            try { $records[$account['instance_id']] = $this->buildDdnsRecordNameForAccount($account, $groupCounts); }
-            catch (\Exception $e) { $this->db->addLog('warning', "DDNS 记录名生成失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage())); }
-        }
-        return $records;
-    }
-
-    private function buildDdnsRecordNameForAccount($account, array $groupCounts): string
-    {
-        $groupKey = $this->getDdnsGroupKey($account);
-        return $this->ddnsService->buildRecordName([
-            'account_remark' => $this->resolveGroupRemark($account),
-            'remark' => $account['remark'] ?? '',
-            'instance_name' => $account['instance_name'] ?? '',
-            'instance_id' => $account['instance_id'] ?? ''
-        ], $groupCounts[$groupKey] ?? 1);
-    }
-
-    private function getDdnsGroupCounts(array $accounts): array
-    {
-        $groupCounts = [];
-        foreach ($accounts as $account) {
-            if (empty($account['instance_id'])) continue;
-            $groupKey = $this->getDdnsGroupKey($account);
-            $groupCounts[$groupKey] = ($groupCounts[$groupKey] ?? 0) + 1;
-        }
-        return $groupCounts;
-    }
-
-    private function getDdnsGroupKey($account): string
-    {
-        return $account['group_key'] ?: (($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? ''));
-    }
-
-    private function resolveGroupRemark($account): string
-    {
-        $groupKey = trim((string) ($account['group_key'] ?? ''));
-        if ($groupKey !== '') {
-            foreach ($this->configManager->getAccountGroups() as $group) {
-                if (($group['groupKey'] ?? '') === $groupKey) return trim((string) ($group['remark'] ?? ''));
-            }
-        }
-        return trim((string) ($account['remark'] ?? ''));
-    }
-
-    private function getEffectivePublicIp($account): string
-    {
-        if (($account['public_ip_mode'] ?? '') === 'eip') {
-            $eip = trim((string) ($account['eip_address'] ?? ''));
-            if ($eip !== '' && filter_var($eip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return $eip;
-        }
-        return trim((string) ($account['public_ip'] ?? ''));
-    }
-
-
-}
