@@ -2,7 +2,7 @@
 
 class Helpers
 {
-    public static function getAccountLogLabel(array $account): string
+    public static function getAccountLogLabel($account): string
     {
         $remark = trim((string) ($account['remark'] ?? ''));
         if ($remark !== '') return $remark;

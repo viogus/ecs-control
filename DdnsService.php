@@ -21,7 +21,7 @@ class DdnsService
             && !empty($this->config['ddns_domain']);
     }
 
-    public function buildRecordName(array $account, $sameGroupInstanceCount = 1)
+    public function buildRecordName($account, $sameGroupInstanceCount = 1)
     {
         $domain = $this->normalizeDomain($this->config['ddns_domain'] ?? '');
         if ($domain === '') {
@@ -300,7 +300,7 @@ class DdnsService
         $this->syncForAccounts($after, $source);
     }
 
-    public function deleteForAccount(array $account, array $accountsBefore, string $source = '释放'): void
+    public function deleteForAccount($account, array $accountsBefore, string $source = '释放'): void
     {
         if (!$this->isEnabled() || !$this->db) return;
         try {
@@ -311,7 +311,7 @@ class DdnsService
         }
     }
 
-    public function getEffectivePublicIp(array $account): string
+    public function getEffectivePublicIp($account): string
     {
         if (($account['public_ip_mode'] ?? '') === 'eip') {
             $eip = trim((string) ($account['eip_address'] ?? ''));
@@ -333,12 +333,12 @@ class DdnsService
         return $counts;
     }
 
-    public function getGroupKey(array $account): string
+    public function getGroupKey($account): string
     {
         return $account['group_key'] ?: (($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? ''));
     }
 
-    public function buildRecordNameForAccount(array $account, array $groupCounts): string
+    public function buildRecordNameForAccount($account, array $groupCounts): string
     {
         $groupKey = $this->getGroupKey($account);
         return $this->buildRecordName([
@@ -349,7 +349,7 @@ class DdnsService
         ], $groupCounts[$groupKey] ?? 1);
     }
 
-    public function resolveGroupRemark(array $account): string
+    public function resolveGroupRemark($account): string
     {
         if (!$this->configManager) return trim((string) ($account['remark'] ?? ''));
         $groupKey = trim((string) ($account['group_key'] ?? ''));
@@ -363,7 +363,7 @@ class DdnsService
         return trim((string) ($account['remark'] ?? ''));
     }
 
-    public function getAccountLogLabel(array $account): string
+    public function getAccountLogLabel($account): string
     {
         $remark = trim((string) ($account['remark'] ?? ''));
         if ($remark !== '') return $remark;

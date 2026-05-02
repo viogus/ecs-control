@@ -89,7 +89,7 @@ class MonitorService
         Helpers::logNotificationResult($this->db, $result, $accountLabel);
     }
 
-    private function isRecentlyCreatedInstance(array $account)
+    private function isRecentlyCreatedInstance($account)
     {
         $instanceId = trim((string) ($account['instance_id'] ?? ''));
         if ($instanceId === '') {

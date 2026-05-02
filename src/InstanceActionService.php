@@ -251,7 +251,7 @@ class InstanceActionService
 
     // ---- helpers ----
 
-    private function safeGetTraffic(array $account): array
+    private function safeGetTraffic($account): array
     {
         try {
             $value = $this->aliyunService->getTraffic($account['access_key_id'], $account['access_key_secret'], $account['region_id']);
@@ -265,7 +265,7 @@ class InstanceActionService
         }
     }
 
-    private function safeGetInstanceStatus(array $account): string
+    private function safeGetInstanceStatus($account): string
     {
         try { return $this->aliyunService->getInstanceStatus($account); }
         catch (\Exception $e) { return 'Unknown'; }
@@ -326,7 +326,7 @@ class InstanceActionService
         $this->syncDdnsForAccounts($after, $source);
     }
 
-    private function deleteDdnsForAccount(array $account, array $accountsBefore, string $source = '释放'): void
+    private function deleteDdnsForAccount($account, array $accountsBefore, string $source = '释放'): void
     {
         if (!$this->ddnsService || !$this->ddnsService->isEnabled()) return;
         try {
@@ -363,7 +363,7 @@ class InstanceActionService
         return $records;
     }
 
-    private function buildDdnsRecordNameForAccount(array $account, array $groupCounts): string
+    private function buildDdnsRecordNameForAccount($account, array $groupCounts): string
     {
         $groupKey = $this->getDdnsGroupKey($account);
         return $this->ddnsService->buildRecordName([
@@ -385,12 +385,12 @@ class InstanceActionService
         return $groupCounts;
     }
 
-    private function getDdnsGroupKey(array $account): string
+    private function getDdnsGroupKey($account): string
     {
         return $account['group_key'] ?: (($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? ''));
     }
 
-    private function resolveGroupRemark(array $account): string
+    private function resolveGroupRemark($account): string
     {
         $groupKey = trim((string) ($account['group_key'] ?? ''));
         if ($groupKey !== '') {
@@ -401,7 +401,7 @@ class InstanceActionService
         return trim((string) ($account['remark'] ?? ''));
     }
 
-    private function getEffectivePublicIp(array $account): string
+    private function getEffectivePublicIp($account): string
     {
         if (($account['public_ip_mode'] ?? '') === 'eip') {
             $eip = trim((string) ($account['eip_address'] ?? ''));

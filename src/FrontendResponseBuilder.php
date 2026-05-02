@@ -286,7 +286,7 @@ class FrontendResponseBuilder
         return $regions[$regionId] ?? $regionId;
     }
 
-    private function safeGetTraffic(array $account): array
+    private function safeGetTraffic($account): array
     {
         try {
             $value = $this->aliyunService->getTraffic(
@@ -298,13 +298,13 @@ class FrontendResponseBuilder
         }
     }
 
-    private function safeGetInstanceStatus(array $account): string
+    private function safeGetInstanceStatus($account): string
     {
         try { return $this->aliyunService->getInstanceStatus($account); }
         catch (\Exception $e) { return 'Unknown'; }
     }
 
-    private function safeGetInstanceFullStatus(array $account): ?array
+    private function safeGetInstanceFullStatus($account): ?array
     {
         try { return $this->aliyunService->getInstanceFullStatus($account); }
         catch (\Exception $e) { return null; }
@@ -315,7 +315,7 @@ class FrontendResponseBuilder
         return trim((string) $status) === 'auth_error';
     }
 
-    private function safeGetBillingInfo(array $account, string $billingCycle): array
+    private function safeGetBillingInfo($account, string $billingCycle): array
     {
         $costInfo = ['enabled' => true, 'monthly_cost' => null, 'balance' => null,
             'currency' => 'CNY', 'last_updated' => null, 'error' => null];
