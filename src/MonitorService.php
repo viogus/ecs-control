@@ -576,6 +576,5 @@ class MonitorService
             // --- 修改：将心跳日志写入数据库 ---
             $this->db->addLog('heartbeat', $logLine);
             $logs[] = $logLine;
-        }
     }
 }
