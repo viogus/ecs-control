@@ -17,7 +17,10 @@ $service = new TelegramControlService($db, $configManager, $app);
 
 while (true) {
     try {
-        $service->processUpdatesWithTimeout(20);
+        $processed = $service->processUpdatesWithTimeout(20);
+        if ($processed === 0) {
+            sleep(30); // 未配置或无新消息时低频等待
+        }
     } catch (\Throwable $e) {
         $db->addLog('error', 'Telegram 控制常驻进程异常: ' . strip_tags($e->getMessage()));
         sleep(5);
