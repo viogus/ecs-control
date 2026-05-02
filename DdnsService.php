@@ -278,12 +278,12 @@ class DdnsService
                 $recordName = $this->buildRecordNameForAccount($account, $groupCounts);
                 $result = $this->syncARecord($recordName, $publicIp);
                 if (!empty($result['success']) && empty($result['skipped'])) {
-                    $this->db->addLog('info', "DDNS 已同步 [{$this->getAccountLogLabel($account)}] {$recordName} -> {$publicIp} ({$source})");
+                    $this->db->addLog('info', "DDNS 已同步 [{Helpers::getAccountLogLabel($account)}] {$recordName} -> {$publicIp} ({$source})");
                 } elseif (empty($result['success'])) {
-                    $this->db->addLog('warning', "DDNS 同步失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($result['message'] ?? '未知错误'));
+                    $this->db->addLog('warning', "DDNS 同步失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($result['message'] ?? '未知错误'));
                 }
             } catch (\Exception $e) {
-                $this->db->addLog('warning', "DDNS 同步失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+                $this->db->addLog('warning', "DDNS 同步失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
             }
         }
     }
@@ -307,7 +307,7 @@ class DdnsService
             $recordName = $this->buildRecordNameForAccount($account, $this->getGroupCounts($accountsBefore));
             $this->deleteRecordAndLog($recordName, $source);
         } catch (\Exception $e) {
-            $this->db->addLog('warning', "DDNS 清理失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+            $this->db->addLog('warning', "DDNS 清理失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
         }
     }
 
@@ -382,7 +382,7 @@ class DdnsService
             if (empty($account['instance_id'])) continue;
             try { $records[$account['instance_id']] = $this->buildRecordNameForAccount($account, $groupCounts); }
             catch (\Exception $e) {
-                if ($this->db) $this->db->addLog('warning', "DDNS 记录名生成失败 [{$this->getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+                if ($this->db) $this->db->addLog('warning', "DDNS 记录名生成失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
             }
         }
         return $records;
