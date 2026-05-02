@@ -120,7 +120,7 @@ class InstanceActionService
             'traffic_api_status' => $trafficResult['status'] ?? 'ok',
             'traffic_api_message' => $trafficResult['message'] ?? ''
         ];
-        if ($this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '')) {
+        if (trim((string) ($trafficResult['status'] ?? '')) === 'auth_error') {
             $metadata['protection_suspended'] = 1;
             $metadata['protection_suspend_reason'] = 'credential_invalid';
         } else {
@@ -258,7 +258,7 @@ class InstanceActionService
             return ['success' => true, 'value' => $value, 'status' => 'ok', 'message' => ''];
         } catch (\Exception $e) {
             $code = $e instanceof \AlibabaCloud\Client\Exception\ClientException ? trim((string) $e->getErrorCode()) : '';
-            if ($this->isCredentialInvalid($code, $e->getMessage())) {
+            if (Helpers::isCredentialInvalidError($code, $e->getMessage())) {
                 return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
             }
             return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => ''];
@@ -269,21 +269,6 @@ class InstanceActionService
     {
         try { return $this->aliyunService->getInstanceStatus($account); }
         catch (\Exception $e) { return 'Unknown'; }
-    }
-
-    private function isCredentialInvalidTrafficStatus($status): bool
-    {
-        return trim((string) $status) === 'auth_error';
-    }
-
-    private function isCredentialInvalid($code, $message = ''): bool
-    {
-        $normalizedCode = strtolower(trim((string) $code));
-        $normalizedMessage = strtolower(trim((string) $message));
-        $codes = ['invalidaccesskeyid.notfound','invalidaccesskeyid','signaturedoesnotmatch','incompletesignature','forbidden.accesskeydisabled'];
-        if (in_array($normalizedCode, $codes, true)) return true;
-        if ($normalizedMessage === '') return false;
-        return strpos($normalizedMessage, 'access key') !== false || strpos($normalizedMessage, 'signature') !== false;
     }
 
     private function releaseManagedEipForPendingAccount(array &$account, string $accountLabel): bool
