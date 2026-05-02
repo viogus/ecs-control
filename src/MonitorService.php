@@ -285,7 +285,7 @@ class MonitorService
     }
 
 
-    private function processAccount(array $account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, bool $keepAlive, bool $monthlyAutoStart, int $userInterval, array &$logs): void
+    private function processAccount($account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, bool $keepAlive, bool $monthlyAutoStart, int $userInterval, array &$logs): void
     {
             $accountLabel = Helpers::getAccountLogLabel($account);
             $logPrefix = "[{$accountLabel}]";
