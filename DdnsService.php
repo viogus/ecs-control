@@ -363,17 +363,6 @@ class DdnsService
         return trim((string) ($account['remark'] ?? ''));
     }
 
-    public function getAccountLogLabel($account): string
-    {
-        $remark = trim((string) ($account['remark'] ?? ''));
-        if ($remark !== '') return $remark;
-        $name = trim((string) ($account['instance_name'] ?? ''));
-        if ($name !== '') return $name;
-        $id = trim((string) ($account['instance_id'] ?? ''));
-        if ($id !== '') return $id;
-        return substr((string) ($account['access_key_id'] ?? ''), 0, 7) . '***';
-    }
-
     private function getRecordNames(array $accounts): array
     {
         $groupCounts = $this->getGroupCounts($accounts);
