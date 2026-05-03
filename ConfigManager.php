@@ -151,6 +151,12 @@ class ConfigManager
     }
 
 
+    public function getAccountGroupMetrics(): array
+    {
+        return $this->accountSync->getAccountGroupMetrics($this->accountsCache);
+    }
+
+
     public function isInitialized()
     {
         return !empty($this->configCache['admin_password']);
