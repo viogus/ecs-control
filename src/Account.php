@@ -115,64 +115,8 @@ class Account implements \ArrayAccess
         return $a;
     }
 
-    public function logLabel(): string
-    {
-        if (trim($this->remark) !== '') return trim($this->remark);
-        if (trim($this->instanceName) !== '') return trim($this->instanceName);
-        if (trim($this->instanceId) !== '') return trim($this->instanceId);
-        return $this->maskedKey();
-    }
 
-    public function maskedKey(): string
-    {
-        return substr($this->accessKeyId, 0, 7) . '***';
-    }
 
-    public function effectiveGroupKey(): string
-    {
-        return $this->groupKey !== '' ? $this->groupKey : substr(sha1($this->accessKeyId . '|' . $this->regionId), 0, 16);
-    }
-
-    public function toArray(): array
-    {
-        return [
-            'id' => $this->id, 'access_key_id' => $this->accessKeyId, 'access_key_secret' => $this->accessKeySecret,
-            'region_id' => $this->regionId, 'instance_id' => $this->instanceId, 'group_key' => $this->groupKey,
-            'max_traffic' => $this->maxTraffic, 'traffic_used' => $this->trafficUsed,
-            'traffic_billing_month' => $this->trafficBillingMonth, 'instance_status' => $this->instanceStatus,
-            'health_status' => $this->healthStatus, 'stopped_mode' => $this->stoppedMode,
-            'updated_at' => $this->updatedAt, 'last_keep_alive_at' => $this->lastKeepAliveAt,
-            'is_deleted' => $this->isDeleted, 'schedule_enabled' => $this->scheduleEnabled ? 1 : 0,
-            'schedule_start_enabled' => $this->scheduleStartEnabled ? 1 : 0,
-            'schedule_stop_enabled' => $this->scheduleStopEnabled ? 1 : 0,
-            'start_time' => $this->startTime, 'stop_time' => $this->stopTime,
-            'schedule_last_start_date' => $this->scheduleLastStartDate,
-            'schedule_last_stop_date' => $this->scheduleLastStopDate,
-            'schedule_blocked_by_traffic' => $this->scheduleBlockedByTraffic ? 1 : 0,
-            'auto_start_blocked' => $this->autoStartBlocked ? 1 : 0,
-            'remark' => $this->remark, 'site_type' => $this->siteType,
-            'instance_name' => $this->instanceName, 'instance_type' => $this->instanceType,
-            'internet_max_bandwidth_out' => $this->internetMaxBandwidthOut,
-            'public_ip' => $this->publicIp, 'public_ip_mode' => $this->publicIpMode,
-            'eip_allocation_id' => $this->eipAllocationId, 'eip_address' => $this->eipAddress,
-            'eip_managed' => $this->eipManaged ? 1 : 0, 'private_ip' => $this->privateIp,
-            'cpu' => $this->cpu, 'memory' => $this->memory, 'os_name' => $this->osName,
-            'traffic_api_status' => $this->trafficApiStatus, 'traffic_api_message' => $this->trafficApiMessage,
-            'protection_suspended' => $this->protectionSuspended ? 1 : 0,
-            'protection_suspend_reason' => $this->protectionSuspendReason,
-            'protection_suspend_notified_at' => $this->protectionSuspendNotifiedAt,
-        ];
-    }
-
-    // ArrayAccess for backward compatibility with array-based code
-    private function propFor(string $dbCol): ?string { return self::FIELD_MAP[$dbCol] ?? null; }
-
-    public function offsetExists(mixed $offset): bool { return isset(self::FIELD_MAP[$offset]); }
-
-    public function offsetGet(mixed $offset): mixed
-    {
-        $prop = self::FIELD_MAP[$offset] ?? null;
-        if ($prop === null) return null;
         $value = $this->$prop;
         // Booleans should return int for backward compat (DB stores 0/1)
         if (is_bool($value)) return $value ? 1 : 0;
