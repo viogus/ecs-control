@@ -122,6 +122,7 @@ class AccountSyncService
                 $remoteInstanceIds[] = $instance['instanceId'];
                 $compositeKey = $group['groupKey'] . '|' . $instance['instanceId'];
                 $existingRow = $existingByComposite[$compositeKey] ?? null;
+                $net = self::resolveNetworkMetadata($instance, $existingRow);
 
                 if ($existingRow) {
                     $updateStmt->execute([
@@ -134,8 +135,8 @@ class AccountSyncService
                         self::resolveRemark($group, $instance, $existingRow), $group['siteType'], $group['groupKey'],
                         $instance['instanceName'] ?? '', $instance['instanceType'] ?? '',
                         (int) ($instance['internetMaxBandwidthOut'] ?? 0), $instance['publicIp'] ?? '',
-                        $instance['publicIpMode'] ?? 'ecs_public_ip', $instance['eipAllocationId'] ?? '',
-                        $instance['eipAddress'] ?? '', $instance['eipManaged'] ?? 0,
+                        $net['public_ip_mode'], $net['eip_allocation_id'],
+                        $net['eip_address'], $net['eip_managed'],
                         $instance['privateIp'] ?? '', (int) ($instance['cpu'] ?? 0), (int) ($instance['memory'] ?? 0),
                         $instance['osName'] ?? '', $instance['stoppedMode'] ?? '', $existingRow['id']
                     ]);
@@ -150,8 +151,8 @@ class AccountSyncService
                         self::resolveRemark($group, $instance), $group['siteType'], $group['groupKey'],
                         $instance['instanceName'] ?? '', $instance['instanceType'] ?? '',
                         (int) ($instance['internetMaxBandwidthOut'] ?? 0), $instance['publicIp'] ?? '',
-                        $instance['publicIpMode'] ?? 'ecs_public_ip', $instance['eipAllocationId'] ?? '',
-                        $instance['eipAddress'] ?? '', $instance['eipManaged'] ?? 0,
+                        $net['public_ip_mode'], $net['eip_allocation_id'],
+                        $net['eip_address'], $net['eip_managed'],
                         $instance['privateIp'] ?? '', (int) ($instance['cpu'] ?? 0), (int) ($instance['memory'] ?? 0),
                         $instance['osName'] ?? '', $instance['stoppedMode'] ?? ''
                     ]);
