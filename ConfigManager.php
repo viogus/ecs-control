@@ -508,7 +508,7 @@ class ConfigManager
         $this->load();
     }
 
-    public function markAccountAsDeleted($id, $forceStop = false)
+    public function markAccountAsDeleted($id)
     {
         $stmt = $this->db->prepare("UPDATE accounts SET is_deleted = 1 WHERE id = ?");
         $stmt->execute([$id]);

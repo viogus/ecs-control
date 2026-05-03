@@ -99,9 +99,10 @@ class AliyunTrafficCheck
     public function login($password)
     {
         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-        if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-            $ip = trim($ips[0]);
+        // 仅当 REMOTE_ADDR 是内网地址（反向代理/Docker 网关）时才信任 X-Forwarded-For
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
+            && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $ip = trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
         }
 
         $attempts = $this->db->getRecentFailedAttempts($ip, 900);

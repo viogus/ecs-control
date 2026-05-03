@@ -61,7 +61,7 @@ class InstanceActionService
         if (!$targetAccount) return false;
 
         $this->db->addLog('warning', "操作成功：秒级标记释放指令已提交，后台安全队列正在接管 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']}");
-        $this->configManager->markAccountAsDeleted($accountId, $forceStop);
+        $this->configManager->markAccountAsDeleted($accountId);
         return true;
     }
 

@@ -58,7 +58,10 @@ class AccountSyncService
                 }
             }
             $isCurrent = ($acc['traffic_billing_month'] ?? '') === date('Y-m');
-            $metrics[$gk]['usageUsed'] += $isCurrent ? (float) ($acc['traffic_used'] ?? 0) : 0.0;
+            $tu = $isCurrent ? (float) ($acc['traffic_used'] ?? 0) : 0.0;
+            if ($tu > $metrics[$gk]['usageUsed']) {
+                $metrics[$gk]['usageUsed'] = $tu;
+            }
             $metrics[$gk]['lastUpdated'] = max($metrics[$gk]['lastUpdated'], (int) ($acc['updated_at'] ?? 0));
         }
 
@@ -240,6 +243,26 @@ class AccountSyncService
         }
         if (!empty($instance['instanceName'])) return $instance['instanceName'];
         return $instance['instanceId'] ?? '';
+    }
+
+    public static function resolveNetworkMetadata(array $instance, ?array $existingRow = null): array
+    {
+        $eipAllocationId = trim((string) ($instance['eipAllocationId'] ?? ''));
+        $eipAddress = trim((string) ($instance['eipAddress'] ?? ''));
+        $existingMode = trim((string) ($existingRow['public_ip_mode'] ?? ''));
+        $existingManaged = (int) ($existingRow['eip_managed'] ?? 0);
+
+        $mode = $eipAllocationId !== '' ? 'eip' : 'ecs_public_ip';
+        if ($existingMode === 'eip' && $eipAllocationId !== '') {
+            $mode = 'eip';
+        }
+
+        return [
+            'public_ip_mode' => $mode,
+            'eip_allocation_id' => $eipAllocationId !== '' ? $eipAllocationId : trim((string) ($existingRow['eip_allocation_id'] ?? '')),
+            'eip_address' => $eipAddress !== '' ? $eipAddress : ($mode === 'eip' ? trim((string) ($instance['publicIp'] ?? '')) : ''),
+            'eip_managed' => $existingManaged
+        ];
     }
 
     private function updateGroupBaseSettings(string $groupKey, array $group): void
