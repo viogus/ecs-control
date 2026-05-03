@@ -1,13 +1,37 @@
-# Cloudflare Workers 迁移设计
+# ecs-control 双轨部署设计：Docker + Cloudflare Workers
 
 **日期**: 2026-05-03
 **状态**: 已确认
 
 ## 目标
 
-将 ecs-control 从 Docker/PHP/SQLite 迁移到 Cloudflare Workers/D1/JS，实现 Serverless 零运维部署。
+ecs-control 同时支持两种部署方式，用户按需选择：
 
-## 架构
+- **方案一：Docker**（当前已有）— 自部署容器，PHP/SQLite 全内置，零外部依赖
+- **方案二：Cloudflare Workers**（新增）— Serverless 部署，Worker + D1 替代容器，零运维
+
+两者功能对齐，用户可按自身偏好和基础设施决定用哪一种。Docker 版本继续维护，不废弃。
+
+## 两套方案对比
+
+| 维度 | Docker | CF Workers |
+|------|--------|------------|
+| 部署 | `docker-compose up -d` | `wrangler deploy` |
+| 运维 | 需要一台机器（ECS/VPS） | 零运维 |
+| 数据库 | 本地 SQLite 文件 | D1（Cloudflare 托管 SQLite） |
+| 定时任务 | dcron 每分钟跑 | Cron Triggers 拆 4 个 |
+| 文件存储 | 本地 ./data 目录 | KV（Logo）+ D1（数据） |
+| 会话 | PHP Session | JWT 无状态 |
+| 加密 | libsodium XSalsa20 | Web Crypto AES-256-GCM |
+| 通知 | PHPMailer SMTP | MailChannels / fetch |
+| 费用 | 服务器成本 | Worker 免费额度（10万请求/天 + D1 5GB） |
+| Telegram | 支持 | 暂不支持（后续独立补） |
+
+## 方案一：Docker（保留）
+
+当前系统结构不变。唯一新增：`?action=export` 导出端点，为想切换到 CF Workers 的用户提供数据导出桥梁。
+
+## 方案二：Cloudflare Workers 架构
 
 ```
 ┌─────────────────────────────────────────┐
@@ -38,43 +62,44 @@
 
 ### 公开接口（无需登录）
 
-| 方法 | 路径 | 对应原 action | 说明 |
-|------|------|-------------|------|
-| POST | /api/check-init | check_init | 检查初始化状态 |
-| POST | /api/login | login | 密码登录，返回 JWT + CSRF token |
-| POST | /api/setup | setup | 首次初始化（含迁移 JSON 导入） |
-| GET | /api/brand-logo | brand_logo | Logo 图片 |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/check-init | 检查初始化状态 |
+| POST | /api/login | 密码登录，返回 JWT + CSRF token |
+| POST | /api/setup | 首次初始化（支持粘贴 Docker 导出的 JSON） |
+| GET | /api/brand-logo | Logo 图片（从 KV 读取） |
 
-### 受保护接口（需 JWT）
+### 受保护接口（需 JWT + CSRF）
 
-| 方法 | 路径 | 对应原 action |
-|------|------|-------------|
-| POST | /api/status | get_status |
-| POST | /api/config | get_config |
-| POST | /api/save-config | save_config |
-| POST | /api/logout | logout |
-| POST | /api/refresh-account | refresh_account |
-| POST | /api/sync-group | sync_account_group |
-| POST | /api/restore-schedule | restore_schedule_block |
-| POST | /api/fetch-instances | fetch_instances |
-| POST | /api/test-account | test_account |
-| POST | /api/preview-create | preview_ecs_create |
-| POST | /api/disk-options | get_ecs_disk_options |
-| POST | /api/create-ecs | create_ecs |
-| POST | /api/get-task | get_ecs_create_task |
-| POST | /api/control | control_instance |
-| POST | /api/delete | delete_instance |
-| POST | /api/replace-ip | replace_instance_ip |
-| POST | /api/logs | get_logs |
-| POST | /api/clear-logs | clear_logs |
-| POST | /api/history | get_history |
-| POST | /api/all-instances | get_all_instances |
-| POST | /api/upload-logo | upload_logo |
-| POST | /api/send-test-email | send_test_email |
-| POST | /api/send-test-tg | send_test_telegram |
-| POST | /api/send-test-wh | send_test_webhook |
+Worker API 路径与 Docker `?action=xxx` 一一对应，功能等价：
 
-### 前端页面
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| POST | /api/status | 实例状态快照 |
+| POST | /api/config | 配置读取 |
+| POST | /api/save-config | 配置保存 + 同步 |
+| POST | /api/refresh-account | 刷新单个账号 |
+| POST | /api/sync-group | 同步账号组 |
+| POST | /api/restore-schedule | 恢复定时开关机 |
+| POST | /api/fetch-instances | 获取实例列表 |
+| POST | /api/test-account | 测试账号凭证 |
+| POST | /api/preview-create | ECS 创建预检 |
+| POST | /api/disk-options | 获取磁盘选项 |
+| POST | /api/create-ecs | 创建 ECS |
+| POST | /api/get-task | 查询创建任务 |
+| POST | /api/control | 开关机控制 |
+| POST | /api/delete | 删除实例 |
+| POST | /api/replace-ip | 更换 EIP |
+| POST | /api/logs | 系统日志 |
+| POST | /api/clear-logs | 清空日志 |
+| POST | /api/history | 流量历史 |
+| POST | /api/all-instances | 全部实例 |
+| POST | /api/upload-logo | 上传 Logo |
+| POST | /api/send-test-email | 测试邮件 |
+| POST | /api/send-test-tg | 测试 Telegram |
+| POST | /api/send-test-wh | 测试 Webhook |
+
+### 前端
 
 | GET | / | 管理面板 HTML shell + CDN Vue 3 |
 
@@ -88,7 +113,7 @@
 
 ## 数据库 (D1)
 
-Schema 与原 SQLite 保持一致，共 10 张表：
+Schema 与 Docker 版 SQLite 对齐，共约 11 张表：
 
 - `settings` — 键值配置
 - `accounts` — 账号信息（~30 列）
@@ -98,23 +123,32 @@ Schema 与原 SQLite 保持一致，共 10 张表：
 - `billing_cache` — 账单缓存
 - `instance_traffic_usage` — 实例粒度流量
 - `ecs_create_tasks` — ECS 创建任务记录
-- `telegram_action_tokens` — Telegram 操作令牌（初期保留，暂不用）
+- `telegram_action_tokens` / `telegram_bot_state` — 暂预留
+
+**两套方案的数据完全独立**，各自有各自的 SQLite/D1 文件，不共享。
 
 ## 加密
 
-- 加密算法：Web Crypto AES-256-GCM
-- 密文格式：`ENC2` + base64(iv + ciphertext)
-- 加密密钥：从 Worker Secret `ENCRYPTION_KEY` 读取（256-bit hex）
-- 老 PHP sodium 加密格式（ENC1）不兼容，走迁移流程转换
+CF Workers 使用与 Docker 不同的加密体系：
 
-## Cron Triggers
+| | Docker | CF Workers |
+|------|--------|------------|
+| 算法 | libsodium XSalsa20-Poly1305 | Web Crypto AES-256-GCM |
+| 前缀 | ENC1 | ENC2 |
+| 密钥来源 | `data/.secret_encryption.key` 文件 | Worker Secret 环境变量 |
+
+两个体系的密文互不兼容。同一时刻用户只跑一套方案，不存在跨系统解密的需求。从 Docker 切换到 CF Workers 时通过导出 JSON 桥接（明文解密 → 重新加密）。
+
+## Cron Triggers（仅 CF Workers）
+
+4 个独立 trigger：
 
 | Trigger | Schedule | 职责 |
 |---------|----------|------|
 | cron-traffic | `* * * * *` | CDT 流量查询 → 熔断判断 → 停机/告警 |
 | cron-schedule | `* * * * *` | 定时开关机 + 月初自动开机 + 保活 |
 | cron-ddns | `*/10 * * * *` | DDNS A 记录同步 |
-| cron-cleanup | `5 3 * * *` | 日志清理 + VACUUM + 账单缓存刷新 + 实例释放队列处理 |
+| cron-cleanup | `5 3 * * *` | 日志清理 + VACUUM + 账单缓存刷新 + 实例释放队列 |
 
 ## 阿里云 API 签名
 
@@ -124,9 +158,11 @@ Schema 与原 SQLite 保持一致，共 10 张表：
 
 ## 通知服务
 
-- Email：通过 MailChannels（免费 1000 封/天），或外部 SMTP API 中转
-- Webhook：`fetch()` 发送，与原 PHP 逻辑等价
-- Telegram：暂不迁移，待后续独立部署
+| 通道 | Docker | CF Workers |
+|------|--------|------------|
+| Email | PHPMailer SMTP | MailChannels（免费 1000 封/天） |
+| Webhook | curl | `fetch()` |
+| Telegram | Bot API 长轮询 | 暂不支持 |
 
 ## DDNS
 
@@ -134,32 +170,36 @@ Schema 与原 SQLite 保持一致，共 10 张表：
 - 子域名生成：中文备注直接 sha1 前 8 位，不再尝试 iconv 音译
 - Token 存 D1，读内存直接用
 
-## 前端
+## 前端（CF Workers 版）
 
-- 单文件 HTML + CDN Vue 3
-- Worker 返回 HTML 字符串
+- 单文件 HTML + CDN Vue 3，Worker 直接返回字符串
 - 组件保持内联风格
-- 密码字段不再用 `********` 占位：留空 = 不改，输入 = 更新
-- `brand-logo` 存 KV 或 Worker 返回 base64
+- 密码字段：留空 = 不改，输入 = 更新（不再用 `********` 占位）
+- `brand-logo` 存 KV，Worker 返回 base64
 
-## 迁移流程
+## 从 Docker 切换到 CF Workers 的流程
 
-1. 老系统（PHP）新增 `?action=export` 接口，需管理员 + CSRF 验证
-2. `/api/export` 解密所有 AK Secret 后返回 JSON（含 settings、accounts、version=1）
-3. 用户在新系统初始化页面粘贴 JSON
-4. Worker 收到后：验证 JSON → 用 ENCRYPTION_KEY 重新 AES-256-GCM 加密 AK Secret → 写入 D1
-5. 初始化完成，旧系统下线
+两套方案独立部署，新用户可直接用 CF Workers 开始。已在使用 Docker 的用户如需切换：
 
-## 暂不迁移
+1. 访问 Docker 部署的 `?action=export`（需管理员登录 + CSRF）
+2. PHP 解密所有 AK Secret → 输出明文 JSON（含 settings、accounts、version=1）
+3. 复制 JSON 内容
+4. 打开 CF Workers 部署的控制台→ 粘贴 JSON 到初始化表单
+5. Worker 用 ENCRYPTION_KEY 加密 → 写入 D1
+6. 初始化完成
+
+切换后两套系统独立运行，不互相通信。旧 Docker 实例可下线。
+
+## 暂不实现（CF Workers 版）
 
 - Telegram 控制（telegram_worker.php + TelegramControlService）
-- 后续可考虑独立 Worker + Webhook 模式，或轻量 VPS 上保留长轮询
+- `readfile()` 输出 Logo → 改为 KV 存储 base64
+- `flock()` 文件锁 → 等 Telegram 接入时用 D1 或 DO 实现并发控制
 
 ## 兼容性注意事项
 
-- 老 PHP sodium 加密数据不直接可读，需通过导出 JSON 桥接
-- D1 不支持 `IF NOT EXISTS` 语法，建表语句需独立于数据迁移
-- Worker 无文件系统，所有数据通过 D1/KV/Env 存储
-- Logo 上传改为 KV 存储
-- 文件锁（flock）逻辑在 Worker 中不可用（fopen 不存在），Telegram 并发锁到时再说
-- `readfile()` 等价物 → Worker 从 KV 读取后返回 Response body
+- D1 不支持 `IF NOT EXISTS` 建表语法，迁移脚本需独立管理
+- Worker 无文件系统，所有持久化走 D1 或 KV
+- Worker 单次 CPU 时间有限制（免费 10ms，付费 30s），需注意阿里云 API 超时
+- Worker 体积限制 1MB，避免引入重量级 npm 依赖
+- 两套方案的 API 路径格式不同（`?action=xxx` vs `/api/xxx`），前端需根据实际部署调整请求路径
