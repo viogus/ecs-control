@@ -47,7 +47,7 @@ class InstanceActionService
                     $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), '实例启动后');
                 }
             }
-            return true;
+            return $result;
         } catch (\Exception $e) {
             $code = $e instanceof \AlibabaCloud\Client\Exception\ClientException ? 'ClientException' : ($e instanceof \AlibabaCloud\Client\Exception\ServerException ? 'ServerException' : 'Exception');
             $this->db->addLog('error', "实例操作失败 [{$action}]: " . strip_tags($e->getMessage()));
