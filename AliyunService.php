@@ -19,61 +19,12 @@ class AliyunService
      * @return mixed
      * @throws \Exception
      */
-    private function executeWithRetry(callable $func, $action, $maxRetries = 3) // 优化点1: 将默认重试次数回调为 3 次，平衡前端等待体验
-    {
-        $attempt = 0;
-        $lastException = null;
-
-        while ($attempt < $maxRetries) {
-            try {
-                return $func();
-            } catch (ClientException $e) {
-                // 客户端错误(4xx)通常不重试，除非是流控限制(Throttling)
-                $errorCode = $e->getErrorCode();
-                if (stripos($errorCode, 'Throttling') !== false) {
-                    $lastException = $e;
-                    // 流控触发时，等待时间稍长
-                    $this->backoff($attempt, true);
-                    $attempt++;
-                    continue;
-                }
-                throw $e; // 其他 4xx 错误直接抛出（如 AccessKey 错误）
-            } catch (ServerException $e) {
-                // 服务端错误(5xx)需要重试
-                $lastException = $e;
-            } catch (\Exception $e) {
-                // 网络/cURL错误(超时、无法解析DNS等)需要重试
-                $lastException = $e;
-            }
-
-            $attempt++;
-            if ($attempt < $maxRetries) {
-                // 记录简短日志到标准输出（可选，方便调试 Docker logs）
-                // echo "Warning: Retrying $action (Attempt $attempt/$maxRetries)...\n";
-                $this->backoff($attempt);
-            }
-        }
-
-        throw $lastException;
-    }
 
     /**
      * 指数退避策略
      * @param int $attempt 当前尝试次数
      * @param bool $isThrottling 是否因为流控
      */
-    private function backoff($attempt, $isThrottling = false)
-    {
-        // 优化点2: 基础等待时间从 0.5s 提升至 1s
-        // 序列变为: 1s, 2s, 4s... 3次重试总耗时控制在合理范围内
-        $base = 1000000 * pow(2, $attempt);
-        if ($isThrottling) {
-            $base *= 2; // 流控时等待时间翻倍
-        }
-        // 增加随机抖动，避免多线程/多容器并发请求撞车
-        $jitter = rand(0, 500000);
-        usleep($base + $jitter);
-    }
 
     private $trafficCache = [];
 
@@ -143,7 +94,7 @@ class AliyunService
             $result = $this->trafficCache[$cacheKey];
         } else {
             // 2. 如果无缓存，发起 API 请求
-            $result = $this->executeWithRetry(function () use ($key, $secret) {
+            $result = RetryHandler::execute(function () use ($key, $secret) {
                 AlibabaCloud::accessKeyClient($key, $secret)
                     ->regionId('cn-hongkong') // CDT 接口通常用 cn-hongkong 或 cn-hangzhou 调用即可获取全局数据
                     ->asDefaultClient();
@@ -287,7 +238,7 @@ class AliyunService
                     $query['NextToken'] = $nextToken;
                 }
 
-                $result = $this->executeWithRetry(function () use ($key, $secret, $query) {
+                $result = RetryHandler::execute(function () use ($key, $secret, $query) {
                     AlibabaCloud::accessKeyClient($key, $secret)
                         ->regionId('cn-hangzhou')
                         ->asDefaultClient();
@@ -355,7 +306,7 @@ class AliyunService
      */
     public function getInstanceStatus($account)
     {
-        return $this->executeWithRetry(function () use ($account) {
+        return RetryHandler::execute(function () use ($account) {
             AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
                 ->regionId($account['region_id'])
                 ->asDefaultClient();
@@ -403,7 +354,7 @@ class AliyunService
      */
     public function getInstanceFullStatus($account)
     {
-        return $this->executeWithRetry(function () use ($account) {
+        return RetryHandler::execute(function () use ($account) {
             AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
                 ->regionId($account['region_id'])
                 ->asDefaultClient();
@@ -450,7 +401,7 @@ class AliyunService
         }
 
         try {
-            return $this->executeWithRetry(function () use ($account) {
+            return RetryHandler::execute(function () use ($account) {
                 AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
                     ->regionId($account['region_id'])
                     ->asDefaultClient();
@@ -489,7 +440,7 @@ class AliyunService
      */
     public function controlInstance($account, $action, $shutdownMode = 'KeepCharging')
     {
-        return $this->executeWithRetry(function () use ($account, $action, $shutdownMode) {
+        return RetryHandler::execute(function () use ($account, $action, $shutdownMode) {
             AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
                 ->regionId($account['region_id'])
                 ->asDefaultClient();
@@ -540,7 +491,7 @@ class AliyunService
             return $this->regionCache[$cacheKey];
         }
 
-        $result = $this->executeWithRetry(function () use ($key, $secret) {
+        $result = RetryHandler::execute(function () use ($key, $secret) {
             AlibabaCloud::accessKeyClient($key, $secret)
                 ->regionId('cn-hangzhou')
                 ->asDefaultClient();
@@ -607,7 +558,7 @@ class AliyunService
 
             try {
                 do {
-                    $result = $this->executeWithRetry(function () use ($key, $secret, $region, $pageNumber) {
+                    $result = RetryHandler::execute(function () use ($key, $secret, $region, $pageNumber) {
                         AlibabaCloud::accessKeyClient($key, $secret)
                             ->regionId($region['regionId'])
                             ->asDefaultClient();
@@ -959,7 +910,7 @@ class AliyunService
 
     private function selectAvailableZone($key, $secret, $regionId, $instanceType)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $instanceType) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $instanceType) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -996,7 +947,7 @@ class AliyunService
 
     private function describeInstanceType($key, $secret, $regionId, $instanceType)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $instanceType) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $instanceType) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1040,7 +991,7 @@ class AliyunService
         $profile = $profiles[$osKey] ?? $profiles['debian_12'];
         $architecture = $this->normalizeImageArchitecture($cpuArchitecture);
 
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $profile, $architecture) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $profile, $architecture) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             $query = [
@@ -1114,7 +1065,7 @@ class AliyunService
             return $existing[0];
         }
 
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $name, $cidr) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $name, $cidr) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1148,7 +1099,7 @@ class AliyunService
             return $existing[0];
         }
 
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $zoneId, $vpcId, $name, $cidr) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $zoneId, $vpcId, $name, $cidr) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1184,7 +1135,7 @@ class AliyunService
             return $existing[0];
         }
 
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $vpcId, $name) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $vpcId, $name) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1216,7 +1167,7 @@ class AliyunService
     private function authorizeSecurityGroupRule($key, $secret, $regionId, $securityGroupId, $port, $sourceCidrIp)
     {
         try {
-            $this->executeWithRetry(function () use ($key, $secret, $regionId, $securityGroupId, $port, $sourceCidrIp) {
+            RetryHandler::execute(function () use ($key, $secret, $regionId, $securityGroupId, $port, $sourceCidrIp) {
                 $this->setDefaultClient($key, $secret, $regionId);
 
                 return AlibabaCloud::rpc()
@@ -1259,7 +1210,7 @@ class AliyunService
 
         foreach ($rules as $rule) {
             try {
-                $this->executeWithRetry(function () use ($key, $secret, $regionId, $securityGroupId, $rule) {
+                RetryHandler::execute(function () use ($key, $secret, $regionId, $securityGroupId, $rule) {
                     $this->setDefaultClient($key, $secret, $regionId);
 
                     return AlibabaCloud::rpc()
@@ -1295,7 +1246,7 @@ class AliyunService
 
     private function runInstance($key, $secret, $regionId, array $params)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $params) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $params) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1338,7 +1289,7 @@ class AliyunService
 
     private function allocateEipAddress($key, $secret, $regionId, $bandwidth, $instanceName)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $bandwidth, $instanceName) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $bandwidth, $instanceName) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1386,7 +1337,7 @@ class AliyunService
             throw new \Exception('EIP 绑定参数缺失');
         }
 
-        return $this->executeWithRetry(function () use ($key, $secret, $regionId, $allocationId, $instanceId) {
+        return RetryHandler::execute(function () use ($key, $secret, $regionId, $allocationId, $instanceId) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1417,7 +1368,7 @@ class AliyunService
         }
 
         try {
-            $this->executeWithRetry(function () use ($key, $secret, $regionId, $allocationId, $instanceId) {
+            RetryHandler::execute(function () use ($key, $secret, $regionId, $allocationId, $instanceId) {
                 $this->setDefaultClient($key, $secret, $regionId);
 
                 $query = [
@@ -1464,7 +1415,7 @@ class AliyunService
         }
 
         try {
-            $this->executeWithRetry(function () use ($key, $secret, $regionId, $allocationId) {
+            RetryHandler::execute(function () use ($key, $secret, $regionId, $allocationId) {
                 $this->setDefaultClient($key, $secret, $regionId);
 
                 return AlibabaCloud::rpc()
@@ -1507,7 +1458,7 @@ class AliyunService
 
     private function describeEipAddress($key, $secret, $regionId, $allocationId)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $allocationId) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $allocationId) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1619,7 +1570,7 @@ class AliyunService
 
     private function describeInstancesByIds($key, $secret, $regionId, array $instanceIds)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $instanceIds) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $instanceIds) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1658,7 +1609,7 @@ class AliyunService
 
     private function describeManagedVpcs($key, $secret, $regionId)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1685,7 +1636,7 @@ class AliyunService
 
     private function describeManagedVSwitches($key, $secret, $regionId, $vpcId, $zoneId)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $vpcId, $zoneId) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $vpcId, $zoneId) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1714,7 +1665,7 @@ class AliyunService
 
     private function describeManagedSecurityGroups($key, $secret, $regionId, $vpcId)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $vpcId) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $vpcId) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1747,7 +1698,7 @@ class AliyunService
 
     private function getSystemDiskSizeRange($key, $secret, $regionId, $zoneId, $instanceType, $diskCategory)
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $zoneId, $instanceType, $diskCategory) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $zoneId, $instanceType, $diskCategory) {
             $this->setDefaultClient($key, $secret, $regionId);
 
             return AlibabaCloud::rpc()
@@ -1934,7 +1885,7 @@ class AliyunService
 
         $bss = $this->getBssEndpoint($siteType);
 
-        $result = $this->executeWithRetry(function () use ($key, $secret, $bss) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)
                 ->regionId($bss['regionId'])
                 ->asDefaultClient();
@@ -1975,7 +1926,7 @@ class AliyunService
     {
         $bss = $this->getBssEndpoint($siteType);
 
-        $result = $this->executeWithRetry(function () use ($key, $secret, $instanceId, $billingCycle, $bss) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $instanceId, $billingCycle, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)
                 ->regionId($bss['regionId'])
                 ->asDefaultClient();
@@ -2035,7 +1986,7 @@ class AliyunService
     {
         $bss = $this->getBssEndpoint($siteType);
 
-        $result = $this->executeWithRetry(function () use ($key, $secret, $billingCycle, $bss) {
+        $result = RetryHandler::execute(function () use ($key, $secret, $billingCycle, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)
                 ->regionId($bss['regionId'])
                 ->asDefaultClient();
