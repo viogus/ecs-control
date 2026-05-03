@@ -55,13 +55,13 @@ class InstanceActionService
         }
     }
 
-    public function deleteInstance($accountId): bool
+    public function deleteInstance($accountId, bool $forceStop = false): bool
     {
         $targetAccount = $this->configManager->getAccountById($accountId);
         if (!$targetAccount) return false;
 
         $this->db->addLog('warning', "操作成功：秒级标记释放指令已提交，后台安全队列正在接管 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']}");
-        $this->configManager->markAccountAsDeleted($accountId);
+        $this->configManager->markAccountAsDeleted($accountId, $forceStop);
         return true;
     }
 

@@ -849,7 +849,7 @@ class AliyunTrafficCheck
     public function deleteInstanceAction($accountId, $forceStop = false)
     {
         if ($this->initError) return false;
-        return $this->instanceActionService->deleteInstance($accountId);
+        return $this->instanceActionService->deleteInstance($accountId, $forceStop);
     }
 
     public function replaceInstanceIpAction($accountId)

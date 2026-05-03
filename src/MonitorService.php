@@ -385,7 +385,7 @@ class MonitorService
                     if ($protectionSuspended && $protectionSuspendReason === 'credential_invalid') {
                         if ($protectionSuspendNotifiedAt <= 0) {
                             $actions[] = "账号密钥失效，已暂停自动停机";
-                            $notifyResult = $this->notificationService->notifyCredentialInvalid($accountLabel, $accountTraffic, $usagePercent, $threshold);
+                            $notifyResult = $this->notificationService->notifyCredentialInvalid($account['access_key_id'], $accountTraffic, $usagePercent, $threshold);
                             Helpers::logNotificationResult($this->db, $notifyResult, $accountLabel);
                             $this->db->addLog('warning', "检测到账号鉴权失效，已暂停自动停机保护 [{$accountLabel}] 当前使用率:{$usagePercent}%");
                             $protectionSuspendNotifiedAt = $currentTime;
@@ -423,7 +423,7 @@ class MonitorService
                 }
 
                 if (!empty($actions) && !($protectionSuspended && $protectionSuspendReason === 'credential_invalid')) {
-                    $mailRes = $this->notificationService->sendTrafficWarning($accountLabel, $accountTraffic, $usagePercent, implode(',', $actions), $threshold);
+                    $mailRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $accountTraffic, $usagePercent, implode(',', $actions), $threshold);
                     Helpers::logNotificationResult($this->db, $mailRes, $accountLabel);
                 }
             }
