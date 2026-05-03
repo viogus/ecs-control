@@ -115,10 +115,21 @@ class Account implements \ArrayAccess
         return $a;
     }
 
+    public function maskedKey(): string
+    {
+        return substr($this->accessKeyId, 0, 7) . '***';
+    }
 
+    // ArrayAccess for backward compatibility with array-based code
+    private function propFor(string $dbCol): ?string { return self::FIELD_MAP[$dbCol] ?? null; }
 
+    public function offsetExists(mixed $offset): bool { return isset(self::FIELD_MAP[$offset]); }
+
+    public function offsetGet(mixed $offset): mixed
+    {
+        $prop = self::FIELD_MAP[$offset] ?? null;
+        if ($prop === null) return null;
         $value = $this->$prop;
-        // Booleans should return int for backward compat (DB stores 0/1)
         if (is_bool($value)) return $value ? 1 : 0;
         return $value;
     }
