@@ -150,89 +150,6 @@ class ConfigManager
         return $this->deriveAccountGroupsFromAccounts();
     }
 
-    public function getAccountGroupMetrics()
-    {
-        $groups = $this->getAccountGroups();
-        $metrics = [];
-
-        foreach ($groups as $group) {
-            $groupKey = $group['groupKey'];
-            $maxTraffic = (float) ($group['maxTraffic'] ?? 0);
-            $metrics[$groupKey] = [
-                'usageUsed' => 0.0,
-                'usageRemaining' => $maxTraffic,
-                'usagePercent' => 0.0,
-                'instanceCount' => 0,
-                'lastUpdated' => 0,
-                'trafficStatus' => 'ok',
-                'trafficMessage' => '',
-                '_trafficErrorCount' => 0,
-                '_trafficFirstStatus' => '',
-                '_trafficFirstMessage' => ''
-            ];
-        }
-
-        foreach ($this->accountsCache as $row) {
-            $groupKey = $row['group_key'] ?: $this->buildGroupKey($row['access_key_id'], $row['region_id']);
-            if (!isset($metrics[$groupKey])) {
-                $maxTraffic = (float) ($row['max_traffic'] ?? 0);
-                $metrics[$groupKey] = [
-                    'usageUsed' => 0.0,
-                    'usageRemaining' => $maxTraffic,
-                    'usagePercent' => 0.0,
-                    'instanceCount' => 0,
-                    'lastUpdated' => 0,
-                    'trafficStatus' => 'ok',
-                    'trafficMessage' => '',
-                    '_trafficErrorCount' => 0,
-                    '_trafficFirstStatus' => '',
-                    '_trafficFirstMessage' => ''
-                ];
-            }
-
-            if (!empty($row['instance_id'])) {
-                $metrics[$groupKey]['instanceCount']++;
-                $trafficStatus = trim((string) ($row['traffic_api_status'] ?? 'ok'));
-                if ($trafficStatus !== '' && $trafficStatus !== 'ok') {
-                    $metrics[$groupKey]['_trafficErrorCount']++;
-                    if ($metrics[$groupKey]['_trafficFirstStatus'] === '') {
-                        $metrics[$groupKey]['_trafficFirstStatus'] = $trafficStatus;
-                        $metrics[$groupKey]['_trafficFirstMessage'] = trim((string) ($row['traffic_api_message'] ?? ''));
-                    }
-                }
-            }
-
-            $isCurrentMonthTraffic = ($row['traffic_billing_month'] ?? '') === date('Y-m');
-            $metrics[$groupKey]['usageUsed'] += $isCurrentMonthTraffic ? (float) ($row['traffic_used'] ?? 0) : 0.0;
-            $metrics[$groupKey]['lastUpdated'] = max($metrics[$groupKey]['lastUpdated'], (int) ($row['updated_at'] ?? 0));
-        }
-
-        foreach ($groups as $group) {
-            $groupKey = $group['groupKey'];
-            $maxTraffic = (float) ($group['maxTraffic'] ?? 0);
-            $used = (float) ($metrics[$groupKey]['usageUsed'] ?? 0);
-            $metrics[$groupKey]['usageRemaining'] = max($maxTraffic - $used, 0);
-            $metrics[$groupKey]['usagePercent'] = $maxTraffic > 0 ? min(round(($used / $maxTraffic) * 100, 2), 100) : 0;
-            $errorCount = (int) ($metrics[$groupKey]['_trafficErrorCount'] ?? 0);
-            $instanceCount = (int) ($metrics[$groupKey]['instanceCount'] ?? 0);
-            if ($instanceCount > 0 && $errorCount > 0) {
-                if ($errorCount >= $instanceCount) {
-                    $metrics[$groupKey]['trafficStatus'] = $metrics[$groupKey]['_trafficFirstStatus'] ?: 'error';
-                    $metrics[$groupKey]['trafficMessage'] = $metrics[$groupKey]['_trafficFirstMessage'] ?: '账号下实例流量同步失败';
-                } else {
-                    $metrics[$groupKey]['trafficStatus'] = 'partial';
-                    $metrics[$groupKey]['trafficMessage'] = '部分实例流量同步失败';
-                }
-            }
-            unset(
-                $metrics[$groupKey]['_trafficErrorCount'],
-                $metrics[$groupKey]['_trafficFirstStatus'],
-                $metrics[$groupKey]['_trafficFirstMessage']
-            );
-        }
-
-        return $metrics;
-    }
 
     public function isInitialized()
     {
@@ -309,7 +226,7 @@ class ConfigManager
                 $this->saveNotificationSettings($data['Notification']);
             }
 
-            $groups = $this->normalizeAccountGroups($data['Accounts'] ?? []);
+            $groups = AccountSyncService::normalizeAccountGroups($data['Accounts'] ?? []);
             $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
             $this->syncAccountGroups(true, $groups);
 
@@ -333,14 +250,14 @@ class ConfigManager
             return;
         }
 
-        $groups = $groups === null ? $this->getAccountGroups() : $this->normalizeAccountGroups($groups, true);
+        $groups = $groups === null ? $this->getAccountGroups() : AccountSyncService::normalizeAccountGroups($groups, true);
 
         $existingRows = $this->db->query("SELECT * FROM accounts ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
         $existingByGroup = [];
         $existingByComposite = [];
 
         foreach ($existingRows as $row) {
-            $groupKey = $row['group_key'] ?: $this->buildGroupKey($row['access_key_id'], $row['region_id']);
+            $groupKey = $row['group_key'] ?: AccountSyncService::buildGroupKey($row['access_key_id'], $row['region_id']);
             $existingByGroup[$groupKey][] = $row;
             $existingByComposite[$groupKey . '|' . $row['instance_id']] = $row;
         }
@@ -436,7 +353,7 @@ class ConfigManager
                 $remoteInstanceIds[] = $instance['instanceId'];
                 $compositeKey = $group['groupKey'] . '|' . $instance['instanceId'];
                 $existingRow = $existingByComposite[$compositeKey] ?? null;
-                $remark = $this->resolveRemark($group, $instance, $existingRow);
+                $remark = AccountSyncService::resolveRemark($group, $instance, $existingRow);
                 $networkMeta = $this->resolveNetworkMetadata($instance, $existingRow);
 
                 if ($existingRow) {
@@ -518,7 +435,7 @@ class ConfigManager
 
         if (!empty($existingRows)) {
             foreach ($existingRows as $row) {
-                $groupKey = $row['group_key'] ?: $this->buildGroupKey($row['access_key_id'], $row['region_id']);
+                $groupKey = $row['group_key'] ?: AccountSyncService::buildGroupKey($row['access_key_id'], $row['region_id']);
                 if (!in_array($groupKey, $configuredGroupKeys, true)) {
                     $deleteStmt = $this->db->prepare("DELETE FROM accounts WHERE id = ?");
                     $deleteStmt->execute([$row['id']]);
@@ -595,72 +512,6 @@ class ConfigManager
         $this->saveSetting('ddns_cf_proxied', !empty($cloudflare['proxied']) ? '1' : '0');
     }
 
-    private function normalizeAccountGroups(array $groups, $allowEmpty = false)
-    {
-        $normalized = [];
-
-        foreach ($groups as $group) {
-            $accessKeyId = trim((string) ($group['AccessKeyId'] ?? ''));
-            $accessKeySecret = trim((string) ($group['AccessKeySecret'] ?? ''));
-            $regionId = trim((string) ($group['regionId'] ?? ''));
-
-            $isPlaceholder = $accessKeySecret === '********';
-            if ($isPlaceholder) {
-                $accessKeySecret = $this->resolveExistingSecret(
-                    $accessKeyId,
-                    $regionId,
-                    trim((string) ($group['groupKey'] ?? ''))
-                );
-            }
-
-            if (!$allowEmpty && $accessKeyId === '' && $accessKeySecret === '' && $regionId === '') {
-                continue;
-            }
-
-            if ($accessKeyId === '' || $accessKeySecret === '' || $regionId === '') {
-                if ($isPlaceholder && !$allowEmpty) {
-                    throw new Exception('账号配置缺少 AccessKeySecret');
-                }
-                if ($allowEmpty) {
-                    continue;
-                }
-                throw new Exception('账号配置缺少必填项');
-            }
-
-            $groupKey = trim((string) ($group['groupKey'] ?? ''));
-            if ($groupKey === '') {
-                $groupKey = $this->buildGroupKey($accessKeyId, $regionId);
-            }
-
-            $scheduleEnabled = !empty($group['scheduleEnabled']) || !empty($group['schedule_enabled']);
-            $startTime = trim((string) ($group['startTime'] ?? $group['start_time'] ?? ''));
-            $stopTime = trim((string) ($group['stopTime'] ?? $group['stop_time'] ?? ''));
-            $scheduleStartEnabled = array_key_exists('scheduleStartEnabled', $group) || array_key_exists('schedule_start_enabled', $group)
-                ? (!empty($group['scheduleStartEnabled']) || !empty($group['schedule_start_enabled']))
-                : ($scheduleEnabled && $startTime !== '');
-            $scheduleStopEnabled = array_key_exists('scheduleStopEnabled', $group) || array_key_exists('schedule_stop_enabled', $group)
-                ? (!empty($group['scheduleStopEnabled']) || !empty($group['schedule_stop_enabled']))
-                : ($scheduleEnabled && $stopTime !== '');
-
-            $normalized[] = [
-                'groupKey' => $groupKey,
-                'AccessKeyId' => $accessKeyId,
-                'AccessKeySecret' => $accessKeySecret,
-                'regionId' => $regionId,
-                'siteType' => $group['siteType'] ?? $this->inferSiteType($regionId),
-                'maxTraffic' => (float) ($group['maxTraffic'] ?? 200),
-                'remark' => trim((string) ($group['remark'] ?? '')),
-                'scheduleEnabled' => $scheduleEnabled || $scheduleStartEnabled || $scheduleStopEnabled,
-                'scheduleStartEnabled' => $scheduleStartEnabled,
-                'scheduleStopEnabled' => $scheduleStopEnabled,
-                'startTime' => $startTime,
-                'stopTime' => $stopTime,
-                'scheduleBlockedByTraffic' => !empty($group['scheduleBlockedByTraffic']) || !empty($group['schedule_blocked_by_traffic'])
-            ];
-        }
-
-        return array_values($normalized);
-    }
 
     private function resolveExistingSecret($accessKeyId, $regionId, $groupKey = '')
     {
@@ -682,7 +533,7 @@ class ConfigManager
             }
         }
 
-        $derivedGroupKey = $this->buildGroupKey($accessKeyId, $regionId);
+        $derivedGroupKey = AccountSyncService::buildGroupKey($accessKeyId, $regionId);
         foreach ($this->accountsCache as $row) {
             if (($row['group_key'] === $derivedGroupKey) && !empty($row['access_key_secret'])) {
                 return $row['access_key_secret'];
@@ -724,7 +575,7 @@ class ConfigManager
                 continue;
             }
 
-            $groupKey = $row['group_key'] ?: $this->buildGroupKey($accessKeyId, $regionId);
+            $groupKey = $row['group_key'] ?: AccountSyncService::buildGroupKey($accessKeyId, $regionId);
             if (isset($groups[$groupKey])) {
                 continue;
             }
@@ -734,7 +585,7 @@ class ConfigManager
                 'AccessKeyId' => $accessKeyId,
                 'AccessKeySecret' => $row['access_key_secret'] ?? '',
                 'regionId' => $regionId,
-                'siteType' => $row['site_type'] ?? $this->inferSiteType($regionId),
+                'siteType' => $row['site_type'] ?? AccountSyncService::inferSiteType($regionId),
                 'maxTraffic' => (float) ($row['max_traffic'] ?? 200),
                 'remark' => $row['remark'] ?? '',
                 'scheduleEnabled' => !empty($row['schedule_enabled']),
@@ -749,39 +600,8 @@ class ConfigManager
         return array_values($groups);
     }
 
-    private function buildGroupKey($accessKeyId, $regionId)
-    {
-        return substr(sha1($accessKeyId . '|' . $regionId), 0, 16);
-    }
 
-    private function inferSiteType($regionId)
-    {
-        if (strpos($regionId, 'cn-') === 0 && $regionId !== 'cn-hongkong') {
-            return 'china';
-        }
-        return 'international';
-    }
 
-    private function resolveRemark($group, $instance, $existingRow = null)
-    {
-        if (!empty($group['remark'])) {
-            return $group['remark'];
-        }
-
-        if ($existingRow) {
-            $existingRemark = trim((string) ($existingRow['remark'] ?? ''));
-            $existingName = trim((string) ($existingRow['instance_name'] ?? ''));
-            if ($existingRemark !== '' && $existingRemark !== $existingName) {
-                return $existingRemark;
-            }
-        }
-
-        if (!empty($instance['instanceName'])) {
-            return $instance['instanceName'];
-        }
-
-        return $instance['instanceId'] ?? '';
-    }
 
     private function resolveNetworkMetadata($instance, $existingRow = null)
     {
@@ -969,7 +789,7 @@ class ConfigManager
             $rowStmt->execute([$id]);
             $row = $rowStmt->fetch();
             if ($row) {
-                $groupKey = $row['group_key'] ?: $this->buildGroupKey($row['access_key_id'] ?? '', $row['region_id'] ?? '');
+                $groupKey = $row['group_key'] ?: AccountSyncService::buildGroupKey($row['access_key_id'] ?? '', $row['region_id'] ?? '');
                 $this->updateStoredAccountGroupScheduleBlock($groupKey, $blocked);
             }
         }
