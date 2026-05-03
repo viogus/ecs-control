@@ -1,6 +1,7 @@
 name = "ecs-control"
 main = "src/index.ts"
 compatibility_date = "2026-05-03"
+compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
 binding = "DB"
@@ -12,4 +13,4 @@ binding = "KV"
 id = ""
 
 [triggers]
-crons = ["* * * * *", "* * * * *", "*/10 * * * *", "5 3 * * *"]
+crons = ["* * * * *", "*/10 * * * *", "5 3 * * *"]
