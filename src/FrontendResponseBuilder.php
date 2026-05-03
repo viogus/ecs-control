@@ -288,14 +288,7 @@ class FrontendResponseBuilder
 
     private function safeGetTraffic($account): array
     {
-        try {
-            $value = $this->aliyunService->getTraffic(
-                $account['access_key_id'], $account['access_key_secret'], $account['region_id']
-            );
-            return ['success' => true, 'value' => $value, 'status' => 'ok', 'message' => ''];
-        } catch (\Exception $e) {
-            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => ''];
-        }
+        return Helpers::safeGetCdtTraffic($this->aliyunService, $account);
     }
 
     private function safeGetInstanceStatus($account): string

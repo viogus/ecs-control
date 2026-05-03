@@ -253,16 +253,7 @@ class InstanceActionService
 
     private function safeGetTraffic($account): array
     {
-        try {
-            $value = $this->aliyunService->getTraffic($account['access_key_id'], $account['access_key_secret'], $account['region_id']);
-            return ['success' => true, 'value' => $value, 'status' => 'ok', 'message' => ''];
-        } catch (\Exception $e) {
-            $code = $e instanceof \AlibabaCloud\Client\Exception\ClientException ? trim((string) $e->getErrorCode()) : '';
-            if (Helpers::isCredentialInvalidError($code, $e->getMessage())) {
-                return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
-            }
-            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => ''];
-        }
+        return Helpers::safeGetCdtTraffic($this->aliyunService, $account);
     }
 
     private function safeGetInstanceStatus($account): string

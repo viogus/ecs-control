@@ -154,43 +154,7 @@ class MonitorService
 
     private function safeGetTraffic($account)
     {
-        try {
-            $value = $this->aliyunService->getTraffic(
-                $account['access_key_id'],
-                $account['access_key_secret'],
-                $account['region_id']
-            );
-            return [
-                'success' => true,
-                'value' => $value,
-                'status' => 'ok',
-                'message' => ''
-            ];
-        } catch (ClientException $e) {
-            $code = trim((string) $e->getErrorCode());
-            if (Helpers::isCredentialInvalidError($code, $e->getMessage())) {
-                $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: AK 已失效");
-                return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
-            }
-            $this->db->addLog('error', "CDT 流量查询配置错误 [{Helpers::getAccountLogLabel($account)}]: " . ($code ?: "鉴权失败") . "，请确认 AK 拥有 CDT 权限");
-            return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => 'CDT 权限不足，请确认 AK 拥有 cdt:ListCdtInternetTraffic 权限'];
-        } catch (ServerException $e) {
-            $code = trim((string) $e->getErrorCode());
-            if (Helpers::isCredentialInvalidError($code, $e->getErrorMessage())) {
-                $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: {$code} - " . $e->getErrorMessage());
-                return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
-            }
-            $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: " . $e->getErrorCode() . " - " . $e->getErrorMessage());
-            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => 'CDT 接口异常'];
-        } catch (\Exception $e) {
-            if (strpos($e->getMessage(), 'cURL error') !== false) {
-                $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: 网络连接超时");
-                return ['success' => false, 'value' => null, 'status' => 'timeout', 'message' => 'CDT 请求超时'];
-            }
-
-            $this->db->addLog('error', "CDT 流量查询失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
-            return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => 'CDT 流量同步失败'];
-        }
+        return Helpers::safeGetCdtTraffic($this->aliyunService, $account, $this->db);
     }
 
     private function getGroupTrafficUsed($account)
