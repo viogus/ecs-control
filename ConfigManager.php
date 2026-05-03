@@ -251,7 +251,7 @@ class ConfigManager
     public function syncAccountGroups($force = false, $groups = null)
     {
         $lastSync = $this->getLastInstanceSyncTime();
-        if (!$force && (time() - $lastSync) < 60) {
+        if (!$force && (time() - $lastSync) < 60) { // 实例同步节流：60 秒内不重复
             $this->load();
             return;
         }
