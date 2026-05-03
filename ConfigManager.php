@@ -7,6 +7,7 @@ class ConfigManager
     private $configCache = [];
     private $accountsCache = [];
     private $encryptionKey = null;
+    private AccountSyncService $accountSync;
 
     public function __construct(Database $db)
     {
@@ -14,6 +15,7 @@ class ConfigManager
         $this->db = $db->getPdo();
         $this->encryptionKey = $this->getEncryptionKey();
         $this->load();
+        $this->accountSync = new AccountSyncService($this->database, $this->configCache, $this->encryptionKey);
     }
 
     private function getEncryptionKey()
@@ -132,29 +134,19 @@ class ConfigManager
 
     public function getAccountGroups()
     {
-        $raw = $this->configCache['account_groups'] ?? '';
-        if (!empty($raw)) {
-            $decoded = json_decode($raw, true);
-            if (is_array($decoded)) {
-                $groups = $this->normalizeAccountGroups($decoded, true);
-                $blockedByGroup = [];
-                foreach ($this->accountsCache as $row) {
-                    $groupKey = $row['group_key'] ?: $this->buildGroupKey($row['access_key_id'], $row['region_id']);
-                    if (!isset($blockedByGroup[$groupKey])) {
-                        $blockedByGroup[$groupKey] = false;
-                    }
-                    if (!empty($row['schedule_blocked_by_traffic'])) {
-                        $blockedByGroup[$groupKey] = true;
-                    }
-                }
-                foreach ($groups as &$group) {
-                    $group['scheduleBlockedByTraffic'] = !empty($blockedByGroup[$group['groupKey'] ?? '']);
-                }
-                unset($group);
-                return $groups;
+        $groups = $this->accountSync->getAccountGroups();
+        if (!empty($groups)) {
+            $blockedByGroup = [];
+            foreach ($this->accountsCache as $row) {
+                $groupKey = $row['group_key'] ?: AccountSyncService::buildGroupKey($row['access_key_id'], $row['region_id']);
+                $blockedByGroup[$groupKey] = !empty($row['schedule_blocked_by_traffic']);
             }
+            foreach ($groups as &$group) {
+                $group['scheduleBlockedByTraffic'] = !empty($blockedByGroup[$group['groupKey'] ?? '']);
+            }
+            unset($group);
+            return $groups;
         }
-
         return $this->deriveAccountGroupsFromAccounts();
     }
 
