@@ -117,7 +117,7 @@ class TelegramControlService
         $command = strtolower(preg_replace('/@.+$/', '', strtok($text, " \n\t") ?: ''));
 
         if (in_array($command, ['/traffic', '流量'], true)) {
-            $this->api->sendMessage($chatId, $this->buildTrafficText(), $this->trafficKeyboard());
+            $this->api->sendMessage($chatId, $this->buildTrafficText(), TelegramKeyboard::traffic());
             return;
         }
 
@@ -126,7 +126,7 @@ class TelegramControlService
             return;
         }
 
-        $this->api->sendMessage($chatId, $this->mainMenuText(), $this->mainMenuKeyboard());
+        $this->api->sendMessage($chatId, TelegramKeyboard::mainMenuText(), TelegramKeyboard::mainMenu());
     }
 
     private function handleCallback(array $callback)
@@ -154,14 +154,14 @@ class TelegramControlService
         $action = $parts[1] ?? 'home';
         if ($action === 'home') {
             $this->api->answerCallback($id);
-            $this->api->editMessage($chatId, $messageId, $this->mainMenuText(), $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, TelegramKeyboard::mainMenuText(), TelegramKeyboard::mainMenu());
         } elseif ($action === 'help') {
             $this->api->answerCallback($id);
-            $this->api->editMessage($chatId, $messageId, $this->helpText(), $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, TelegramKeyboard::helpText(), TelegramKeyboard::mainMenu());
         } elseif ($action === 'traffic') {
             $this->api->answerCallback($id, '正在刷新流量...');
             $this->refreshAllData();
-            $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), $this->trafficKeyboard());
+            $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), TelegramKeyboard::traffic());
             return;
         } elseif ($action === 'list') {
             $this->api->answerCallback($id);
@@ -188,7 +188,7 @@ class TelegramControlService
         } elseif ($action === 'refreshall') {
             $this->api->answerCallback($id, '正在同步数据...');
             $this->refreshAllData();
-            $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), $this->trafficKeyboard());
+            $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), TelegramKeyboard::traffic());
             return;
         } elseif ($action === 'start') {
             $this->api->answerCallback($id, '正在提交开机指令...');
@@ -204,7 +204,7 @@ class TelegramControlService
             $this->api->answerCallback($id);
             $accountId = (int) ($parts[2] ?? 0);
             if (!$this->findInstance($accountId)) {
-                $this->api->editMessage($chatId, $messageId, "释放失败：实例不存在或已被清理。", $this->mainMenuKeyboard());
+                $this->api->editMessage($chatId, $messageId, "释放失败：实例不存在或已被清理。", TelegramKeyboard::mainMenu());
                 return;
             }
             $token = $this->createActionToken($userId, $chatId, 'release', $accountId);
@@ -218,7 +218,7 @@ class TelegramControlService
             $this->api->answerCallback($id);
             $token = (string) ($parts[2] ?? '');
             $this->useActionToken($token, $userId, $chatId, false);
-            $this->api->editMessage($chatId, $messageId, "已取消释放操作。", $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, "已取消释放操作。", TelegramKeyboard::mainMenu());
         } else {
             $this->api->answerCallback($id);
         }
@@ -248,53 +248,9 @@ class TelegramControlService
         }));
     }
 
-    private function mainMenuText()
-    {
-        return "🛡️ ECS 服务器管家\n\n请选择要执行的操作：";
-    }
 
-    private function helpText()
-    {
-        return "📘 使用说明\n\n"
-            . "配置 Telegram 通知后，当前 Bot 默认支持远程控制。\n\n"
-            . "可用功能：\n"
-            . "📊 查看账号概览\n"
-            . "🖥️ 查看实例列表和详情\n"
-            . "🚀 对已停止实例一键开机\n"
-            . "🗑️ 二次确认后释放实例\n\n"
-            . "⚠️ 释放实例会进入后台安全队列，系统会继续处理停机、托管 EIP 回收、ECS 删除和 DDNS 清理。";
-    }
 
-    private function mainMenuKeyboard()
-    {
-        return [
-            'inline_keyboard' => [
-                [
-                    ['text' => '📊 账号概览', 'callback_data' => 'm:traffic'],
-                    ['text' => '🖥️ 实例列表', 'callback_data' => 'm:list:1']
-                ],
-                [
-                    ['text' => '🔄 刷新数据', 'callback_data' => 'm:refreshall'],
-                    ['text' => '📘 帮助说明', 'callback_data' => 'm:help']
-                ]
-            ]
-        ];
-    }
 
-    private function trafficKeyboard()
-    {
-        return [
-            'inline_keyboard' => [
-                [
-                    ['text' => '🔄 刷新流量', 'callback_data' => 'm:traffic'],
-                    ['text' => '🖥️ 查看实例', 'callback_data' => 'm:list:1']
-                ],
-                [
-                    ['text' => '🏠 返回主菜单', 'callback_data' => 'm:home']
-                ]
-            ]
-        ];
-    }
 
     private function buildTrafficText()
     {
@@ -316,10 +272,10 @@ class TelegramControlService
 
             $lines[] = "";
             $lines[] = "👤 账号：" . ($account['remark'] ?: '未命名账号');
-            $lines[] = "📍 区域：" . $this->regionName($account['regionId'] ?? '');
-            $lines[] = "📦 已用：" . $this->formatTraffic($used) . " / " . $this->formatTraffic($total);
+            $lines[] = "📍 区域：" . TelegramKeyboard::regionName($account['regionId'] ?? '');
+            $lines[] = "📦 已用：" . TelegramKeyboard::formatTraffic($used) . " / " . TelegramKeyboard::formatTraffic($total);
             $lines[] = "📈 使用率：" . $percent . "%";
-            $lines[] = $this->trafficStatusIcon($status) . " 状态：" . $status;
+            $lines[] = TelegramKeyboard::trafficStatusIcon($status) . " 状态：" . $status;
         }
 
         return implode("\n", $lines);
@@ -342,8 +298,8 @@ class TelegramControlService
             $lines[] = "";
             $status = $inst['instanceStatus'] ?? '';
             $lines[] = "🖥️ " . ($inst['remark'] ?: $inst['instanceName'] ?: $inst['instanceId']);
-            $lines[] = $this->statusIcon($status) . " 状态：" . $this->statusLabel($status);
-            $lines[] = "📦 流量：" . $this->formatTraffic((float) ($inst['flow_used'] ?? 0)) . " / " . $this->formatTraffic((float) ($inst['flow_total'] ?? 0));
+            $lines[] = TelegramKeyboard::statusIcon($status) . " 状态：" . TelegramKeyboard::statusLabel($status);
+            $lines[] = "📦 流量：" . TelegramKeyboard::formatTraffic((float) ($inst['flow_used'] ?? 0)) . " / " . TelegramKeyboard::formatTraffic((float) ($inst['flow_total'] ?? 0));
             $lines[] = "🌐 IP：" . (($inst['publicIp'] ?? '') ?: '-');
         }
 
@@ -368,7 +324,7 @@ class TelegramControlService
 
         $keyboard = [];
         foreach ($slice as $inst) {
-            $label = $this->shortButtonText($this->statusIcon($inst['instanceStatus'] ?? '') . ' ' . ($inst['remark'] ?: $inst['instanceName'] ?: $inst['instanceId']) . ' / ' . $this->statusLabel($inst['instanceStatus'] ?? ''));
+            $label = TelegramKeyboard::shortButtonText(TelegramKeyboard::statusIcon($inst['instanceStatus'] ?? '') . ' ' . ($inst['remark'] ?: $inst['instanceName'] ?: $inst['instanceId']) . ' / ' . TelegramKeyboard::statusLabel($inst['instanceStatus'] ?? ''));
             $keyboard[] = [['text' => $label, 'callback_data' => 'm:inst:' . (int) $inst['accountId']]];
         }
 
@@ -401,13 +357,13 @@ class TelegramControlService
         $status = $inst['instanceStatus'] ?? '';
         return "🖥️ 实例详情\n\n"
             . "🏷️ 备注：" . ($inst['remark'] ?: '-') . "\n"
-            . "📍 区域：" . ($inst['regionName'] ?? $this->regionName($inst['regionId'] ?? '')) . "\n"
-            . $this->statusIcon($status) . " 状态：" . $this->statusLabel($status) . "\n"
+            . "📍 区域：" . ($inst['regionName'] ?? TelegramKeyboard::regionName($inst['regionId'] ?? '')) . "\n"
+            . TelegramKeyboard::statusIcon($status) . " 状态：" . TelegramKeyboard::statusLabel($status) . "\n"
             . "🆔 实例 ID：" . ($inst['instanceId'] ?: '-') . "\n"
             . "🌐 公网 IP：" . (($inst['publicIp'] ?? '') ?: '-') . "\n"
             . "🔌 公网类型：" . (($inst['publicIpMode'] ?? '') === 'eip' ? 'EIP' : 'ECS 公网') . "\n"
             . "⚙️ 规格：" . (($inst['instanceType'] ?? '') ?: '-') . "\n"
-            . "📦 出口流量：" . $this->formatTraffic((float) ($inst['flow_used'] ?? 0)) . " / " . $this->formatTraffic((float) ($inst['flow_total'] ?? 0)) . "\n"
+            . "📦 出口流量：" . TelegramKeyboard::formatTraffic((float) ($inst['flow_used'] ?? 0)) . " / " . TelegramKeyboard::formatTraffic((float) ($inst['flow_total'] ?? 0)) . "\n"
             . "📈 使用率：" . ((float) ($inst['percentageOfUse'] ?? 0)) . "%\n"
             . "🚧 阈值：" . ((int) ($inst['threshold'] ?? 95)) . "%";
     }
@@ -449,7 +405,7 @@ class TelegramControlService
         $ttl = $this->confirmTtl();
         return "⚠️ 确认释放实例？\n\n"
             . "🖥️ 实例：" . ($inst['remark'] ?: $inst['instanceName'] ?: '-') . "\n"
-            . "📍 区域：" . ($inst['regionName'] ?? $this->regionName($inst['regionId'] ?? '')) . "\n"
+            . "📍 区域：" . ($inst['regionName'] ?? TelegramKeyboard::regionName($inst['regionId'] ?? '')) . "\n"
             . "🆔 实例 ID：" . ($inst['instanceId'] ?: '-') . "\n"
             . "🔌 公网类型：" . (($inst['publicIpMode'] ?? '') === 'eip' ? 'EIP' : 'ECS 公网') . "\n\n"
             . "🗑️ 释放后 ECS 会被删除，系统托管 EIP 和 DDNS 解析会同步清理，操作不可恢复。\n\n"
@@ -475,7 +431,7 @@ class TelegramControlService
     {
         $inst = $this->findInstance($accountId);
         if (!$inst) {
-            $this->api->editMessage($chatId, $messageId, "❌ 开机失败：实例不存在。", $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, "❌ 开机失败：实例不存在。", TelegramKeyboard::mainMenu());
             return;
         }
 
@@ -498,7 +454,7 @@ class TelegramControlService
     {
         $inst = $this->findInstance($accountId);
         if (!$inst) {
-            $this->api->editMessage($chatId, $messageId, "❌ 停机失败：实例不存在。", $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, "❌ 停机失败：实例不存在。", TelegramKeyboard::mainMenu());
             return;
         }
 
@@ -521,7 +477,7 @@ class TelegramControlService
     {
         $record = $this->useActionToken($token, $userId, $chatId, true);
         if (!$record) {
-            $this->api->editMessage($chatId, $messageId, "⏱️ 释放确认已失效，请重新发起释放操作。", $this->mainMenuKeyboard());
+            $this->api->editMessage($chatId, $messageId, "⏱️ 释放确认已失效，请重新发起释放操作。", TelegramKeyboard::mainMenu());
             return;
         }
 
@@ -536,7 +492,7 @@ class TelegramControlService
             $success
                 ? "🗑️ 释放指令已提交。\n\n🖥️ 实例：{$label}\n后台释放队列已接管，会继续处理停机、托管 EIP 回收、ECS 删除和 DDNS 清理。"
                 : "❌ 释放指令提交失败，请查看系统日志。",
-            $this->mainMenuKeyboard()
+            TelegramKeyboard::mainMenu()
         );
     }
 
@@ -634,86 +590,10 @@ class TelegramControlService
 
 
 
-    private function confirmTtl()
-    {
-        return max(30, (int) ($this->settings['notify_tg_confirm_ttl'] ?? 60));
-    }
 
-    private function shortButtonText($text)
-    {
-        $text = trim((string) $text);
-        if (function_exists('mb_strlen') && mb_strlen($text, 'UTF-8') > 28) {
-            return mb_substr($text, 0, 25, 'UTF-8') . '...';
-        }
-        return $text;
-    }
 
-    private function formatTraffic($value)
-    {
-        $value = (float) $value;
-        if ($value <= 0) {
-            return '0 MB';
-        }
-        if ($value < 1) {
-            return round($value * 1024, 2) . ' MB';
-        }
-        return round($value, 2) . ' GB';
-    }
 
-    private function statusLabel($status)
-    {
-        $map = [
-            'Running' => '运行中',
-            'Starting' => '启动中',
-            'Stopping' => '停机中',
-            'Stopped' => '已停止',
-            'Pending' => '创建中',
-            'Releasing' => '释放中',
-            'Released' => '已释放',
-            'Unknown' => '未知'
-        ];
-        return $map[$status] ?? ($status ?: '未知');
-    }
 
-    private function statusIcon($status)
-    {
-        $map = [
-            'Running' => '🟢',
-            'Starting' => '🟡',
-            'Stopping' => '🟠',
-            'Stopped' => '🔴',
-            'Pending' => '🟡',
-            'Releasing' => '🗑️',
-            'Released' => '⚫',
-            'Unknown' => '⚪'
-        ];
-        return $map[$status] ?? '⚪';
-    }
 
-    private function trafficStatusIcon($status)
-    {
-        if (strpos($status, '超量') !== false || strpos($status, '异常') !== false) {
-            return '🔴';
-        }
-        if (strpos($status, '接近') !== false) {
-            return '🟠';
-        }
-        return '🟢';
-    }
 
-    private function regionName($regionId)
-    {
-        $map = [
-            'cn-hongkong' => '中国香港',
-            'ap-southeast-1' => '新加坡',
-            'ap-northeast-1' => '日本（东京）',
-            'us-west-1' => '美国（硅谷）',
-            'us-east-1' => '美国（弗吉尼亚）',
-            'cn-hangzhou' => '华东 1（杭州）',
-            'cn-shanghai' => '华东 2（上海）',
-            'cn-beijing' => '华北 2（北京）',
-            'cn-shenzhen' => '华南 1（深圳）'
-        ];
-        return $map[$regionId] ?? ($regionId ?: '-');
-    }
 }
