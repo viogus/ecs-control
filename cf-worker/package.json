@@ -1,0 +1,20 @@
+{
+  "name": "ecs-control-cf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "db:init": "wrangler d1 execute ecs-control-db --file=db/schema.sql",
+    "test": "vitest run"
+  },
+  "dependencies": { "bcryptjs": "^2.4.3" },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250430.0",
+    "@types/bcryptjs": "^2.4.6",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0",
+    "wrangler": "^4.14.0"
+  }
+}

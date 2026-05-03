@@ -1,0 +1,15 @@
+name = "ecs-control"
+main = "src/index.ts"
+compatibility_date = "2026-05-03"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ecs-control-db"
+database_id = ""
+
+[[kv_namespaces]]
+binding = "KV"
+id = ""
+
+[triggers]
+crons = ["* * * * *", "* * * * *", "*/10 * * * *", "5 3 * * *"]
