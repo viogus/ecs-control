@@ -1,0 +1,52 @@
+name: Deploy CF Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cf-worker/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cf-worker
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: cf-worker/package-lock.json
+
+      - run: npm ci
+
+      - name: Generate and set worker secrets (first run only)
+        run: |
+          existing=$(npx wrangler secret list --format json 2>/dev/null | \
+            node -e "const s=require('fs').readFileSync(0,'utf8');try{const j=JSON.parse(s);const n=new Set(j.map(x=>x.name));if(n.has('ENCRYPTION_KEY')&&n.has('JWT_SECRET'))process.stdout.write('exists')}catch(e){}")
+          if [ "$existing" = "exists" ]; then
+            echo "Secrets already set on Cloudflare, skipping"
+          else
+            key1=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+            key2=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+            echo "Setting ENCRYPTION_KEY..."
+            echo "$key1" | npx wrangler secret put ENCRYPTION_KEY
+            echo "Setting JWT_SECRET..."
+            echo "$key2" | npx wrangler secret put JWT_SECRET
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Deploy Worker
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Apply D1 schema
+        run: npx wrangler d1 execute ecs-control-db --remote --file=db/schema.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
