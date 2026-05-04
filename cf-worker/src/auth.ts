@@ -32,7 +32,8 @@ export async function signJwt(p: Omit<JwtPayload, 'iat' | 'exp'>, secret: string
   const fp: JwtPayload = { ...p, iat: now, exp: now + ttl };
   const h = b64e(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const b = b64e(JSON.stringify(fp));
-  const s = b64e(btoa(String.fromCharCode(...new Uint8Array(await hmacSha256(secret, `${h}.${b}`)))));
+  const rawSig = new Uint8Array(await hmacSha256(secret, `${h}.${b}`));
+  const s = b64e(String.fromCharCode(...rawSig));
   return `${h}.${b}.${s}`;
 }
 
@@ -40,7 +41,8 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtPaylo
   try {
     const [h, b, s] = token.split('.');
     if (!h || !b || !s) return null;
-    const exp = b64e(btoa(String.fromCharCode(...new Uint8Array(await hmacSha256(secret, `${h}.${b}`)))));
+    const rawSig = new Uint8Array(await hmacSha256(secret, `${h}.${b}`));
+    const exp = b64e(String.fromCharCode(...rawSig));
     if (!timingSafeEqual(s, exp)) return null;
     const p: JwtPayload = JSON.parse(b64d(b));
     if (p.exp < Math.floor(Date.now() / 1000)) return null;

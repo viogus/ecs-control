@@ -5,6 +5,8 @@ import { runTrafficCheck } from './monitor';
 import { runScheduleCheck } from './schedules';
 import { syncDdns } from './ddns';
 import { doControl, doDelete } from './instance-actions';
+import { deleteInstance } from './aliyun-api';
+import { decrypt, isEncrypted } from './crypto';
 import { buildPreview } from './ecs-create';
 import { importFromDocker } from './migration';
 import { renderHtml } from './frontend';
@@ -186,7 +188,16 @@ export default {
       // Process pending releases
       const pending = await env.DB.prepare('SELECT * FROM accounts WHERE is_deleted = 1').all();
       for (const acc of pending.results as any[]) {
-        await env.DB.prepare("UPDATE accounts SET is_deleted = 2, instance_status = 'Released' WHERE id = ?").bind(acc.id).run();
+        const secret = String(acc.access_key_secret ?? '');
+        const plainSecret = isEncrypted(secret) ? await decrypt(secret, env.ENCRYPTION_KEY) : secret;
+        const fakeAcc = { ...acc, access_key_secret: plainSecret } as any;
+        try {
+          if (acc.instance_id) await deleteInstance(fakeAcc);
+          await env.DB.prepare("UPDATE accounts SET is_deleted = 2, instance_status = 'Released' WHERE id = ?").bind(acc.id).run();
+          await addLog(env.DB, 'warning', `Instance released by cleanup [${acc.instance_id}]`);
+        } catch (e: any) {
+          await addLog(env.DB, 'error', `Cleanup release failed [${acc.instance_id}]: ${e.message}`);
+        }
       }
     }
   },
