@@ -5,6 +5,7 @@ function hexToBytes(hex: string): Uint8Array {
 }
 
 async function getKey(hex: string): Promise<CryptoKey> {
+  if (hex.length !== 64) throw new Error('ENCRYPTION_KEY must be 64 hex chars (32 bytes)');
   return crypto.subtle.importKey('raw', hexToBytes(hex), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
