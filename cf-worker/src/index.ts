@@ -83,6 +83,7 @@ export default {
       const { password, migration } = await req.json() as any;
       const existingPwd = await getSetting(env.DB, 'admin_password', '');
       if (existingPwd) return jsonResponse({ success: false, message: '已初始化' }, 403);
+      if (!password || password.length < 8) return jsonResponse({ success: false, message: '密码至少需要8个字符' });
       const hashed = await hashPassword(password);
       await saveSetting(env.DB, 'admin_password', hashed);
       await saveSetting(env.DB, 'traffic_threshold', '95');
