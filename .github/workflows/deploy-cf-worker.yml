@@ -28,7 +28,7 @@ jobs:
         run: |
           # Method 1: list existing D1 databases via JSON API
           echo "=== d1 list ==="
-          npx wrangler d1 list --format json 2>&1 | tee /tmp/d1-list.txt || true
+          npx wrangler d1 list --json 2>&1 | tee /tmp/d1-list.txt || true
           uuid=$(node -e "
             try {
               const d=JSON.parse(require('fs').readFileSync('/tmp/d1-list.txt','utf8'));
@@ -99,7 +99,7 @@ jobs:
 
       - name: Generate and set worker secrets (first run only)
         run: |
-          existing=$(npx wrangler secret list --format json 2>/dev/null | \
+          existing=$(npx wrangler secret list --json 2>&1 | \
             node -e "const s=require('fs').readFileSync(0,'utf8');try{const j=JSON.parse(s);const n=new Set(j.map(x=>x.name));if(n.has('ENCRYPTION_KEY')&&n.has('JWT_SECRET'))process.stdout.write('exists')}catch(e){}")
           if [ "$existing" = "exists" ]; then
             echo "Secrets already set on Cloudflare, skipping"
