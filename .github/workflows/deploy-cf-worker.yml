@@ -24,6 +24,31 @@ jobs:
 
       - run: npm ci
 
+      - name: Init D1 (create if not exists, populate database_id)
+        run: |
+          uuid=$(npx wrangler d1 list --format json 2>/dev/null | node -e "
+            const s=require('fs').readFileSync(0,'utf8');
+            try {
+              const dbs=JSON.parse(s);
+              const db=dbs.find(d=>d.name==='ecs-control-db');
+              if (db) process.stdout.write(db.uuid||'');
+            } catch(e){}
+          ")
+          if [ -z "$uuid" ]; then
+            echo "Creating D1 database ecs-control-db..."
+            output=$(npx wrangler d1 create ecs-control-db 2>&1)
+            uuid=$(echo "$output" | grep -oE '[a-f0-9-]{36}' | head -1)
+            if [ -z "$uuid" ]; then
+              echo "Failed to extract database_id from create output"
+              echo "$output"
+              exit 1
+            fi
+          fi
+          echo "D1 database UUID: $uuid"
+          sed -i "s/database_id = \"\"/database_id = \"$uuid\"/" wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
       - name: Generate and set worker secrets (first run only)
         run: |
           existing=$(npx wrangler secret list --format json 2>/dev/null | \
