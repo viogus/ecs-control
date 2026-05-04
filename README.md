@@ -21,6 +21,7 @@ A lightweight controller for cloud server monitoring, traffic control, quota pro
 
 ## 🆕 最近更新
 
+- **新增 Cloudflare Workers 部署方式**：支持将控制面板部署在 Cloudflare 边缘节点，完全无服务器化。详细说明见下方"方式二"。
 - 新增页面 Logo 自定义，支持本地上传或填写图片地址。
 - 优化一键创建 ECS：支持公网 IP 类型、硬盘类型、系统盘大小校验与更换公网 IP。
 - 优化释放中实例展示、前后端状态联动和移动端浮窗/表单体验。
@@ -53,6 +54,44 @@ services:
 docker-compose up -d
 ```
 访问 `http://localhost:43210` 即可开始使用。如需自定义端口，设置环境变量 `PORT` 即可，例如 `PORT=8080 docker-compose up -d`。
+
+### 方式二：Cloudflare Workers (无服务器)
+
+无需服务器，部署在 Cloudflare 边缘节点，适用于不想维护 Docker 容器的用户。
+
+**前置条件**：
+- 一个 [Cloudflare](https://dash.cloudflare.com) 账号
+- 阿里云 AccessKey（与方式一相同）
+
+**部署步骤**：
+
+1. **Fork 本项目**，在 GitHub 仓库添加一个 Secret：
+   - 前往 Settings → Secrets and variables → Actions → New repository secret
+   - Name: `CF_API_TOKEN`，Value: 你的 [Cloudflare API Token](https://dash.cloudflare.com/profile/api-tokens)（需 Workers、D1、Secrets 管理权限）
+
+2. **推送 `cf-worker/` 目录变更到 main 分支**，GitHub Actions 自动完成全部部署：
+   - 自动创建 D1 数据库
+   - 自动生成加密密钥和 JWT 密钥
+   - 部署 Worker 到 `*.workers.dev`
+   - 导入数据库结构
+
+3. **访问** `https://ecs-control.你的名称.workers.dev` 完成初始化。
+
+**本地部署（备用）**：
+```bash
+cd cf-worker
+./deploy.sh all
+```
+
+**两种方式对比**：
+
+| 维度 | Docker | Cloudflare Workers |
+|------|--------|-------------------|
+| 运行环境 | 自有服务器/VPS | Cloudflare 边缘网络 |
+| 数据库 | SQLite (本地文件) | D1 (全球分布式) |
+| 通知渠道 | SMTP/Telegram/Webhook | MailChannels/Webhook |
+| 维护成本 | 需维护 Docker 容器 | 零维护 |
+| 前端 | 完整管理界面 | 登录 + 初始化（通过 Docker 版管理） |
 
 ---
 
@@ -244,10 +283,10 @@ cdt:ListCdtInternetTraffic
 
 ## 🛠️ 技术架构
 
-- **Backend**: 原生 PHP 8.1+，无框架依赖，追求极致性能。
-- **Database**: SQLite 3 (WAL 模式)，兼顾轻量与读写并发。
+- **Docker 版（推荐）**: 原生 PHP 8.1+ + SQLite 3 (WAL 模式)，完整管理界面。
+- **CF Worker 版**: TypeScript + Cloudflare D1 + AES-256-GCM 加密，无服务器部署。
 - **Frontend**: Vue 3.x (SFC 理念) + 原生 Vanilla CSS。
-- **SDK**: Alibaba Cloud SDK for PHP (V1)。
+- **SDK**: 阿里云 OpenAPI RPC 签名（PHP 版用官方 SDK，Worker 版自实现 HMAC-SHA1）。
 
 ---
 
