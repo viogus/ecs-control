@@ -3,14 +3,9 @@ import { decrypt, encrypt } from './crypto';
 import { getInstances } from './aliyun-api';
 import { rowToAccount, getAccounts } from './db';
 
-export function buildGroupKey(accessKeyId: string, regionId: string): string {
-  const str = `${accessKeyId}|${regionId}`;
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) - h) + str.charCodeAt(i);
-    h |= 0;
-  }
-  return Math.abs(h).toString(16).padStart(16, '0');
+export async function buildGroupKey(accessKeyId: string, regionId: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(`${accessKeyId}|${regionId}`));
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
 }
 
 export async function getGroupsFromSettings(db: D1Database): Promise<AccountGroup[]> {
@@ -20,8 +15,8 @@ export async function getGroupsFromSettings(db: D1Database): Promise<AccountGrou
   try {
     const groups = JSON.parse(raw.value);
     if (!Array.isArray(groups)) return [];
-    return groups.map((g: any) => ({
-      groupKey: g.groupKey ?? buildGroupKey(g.AccessKeyId ?? '', g.regionId ?? ''),
+    return Promise.all(groups.map(async (g: any) => ({
+      groupKey: g.groupKey ?? await buildGroupKey(g.AccessKeyId ?? '', g.regionId ?? ''),
       AccessKeyId: g.AccessKeyId ?? '',
       AccessKeySecret: g.AccessKeySecret ?? '',
       regionId: g.regionId ?? '',
@@ -33,7 +28,7 @@ export async function getGroupsFromSettings(db: D1Database): Promise<AccountGrou
       scheduleStopEnabled: !!(g.scheduleStopEnabled ?? false),
       startTime: g.startTime ?? '',
       stopTime: g.stopTime ?? '',
-    }));
+    })));
   } catch { return []; }
 }
 
@@ -57,7 +52,7 @@ export async function syncAccountGroups(
   const existing = await getAccounts(db);
   const existingByGroup: Record<string, Account[]> = {};
   for (const a of existing) {
-    const gk = a.group_key || buildGroupKey(a.access_key_id, a.region_id);
+    const gk = a.group_key || await buildGroupKey(a.access_key_id, a.region_id);
     (existingByGroup[gk] ??= []).push(a);
   }
 
@@ -137,7 +132,7 @@ export async function syncAccountGroups(
   // Remove groups no longer configured
   const configuredKeys = new Set(groups.map(g => g.groupKey));
   for (const a of existing) {
-    const gk = a.group_key || buildGroupKey(a.access_key_id, a.region_id);
+    const gk = a.group_key || await buildGroupKey(a.access_key_id, a.region_id);
     if (!configuredKeys.has(gk)) {
       await db.prepare('DELETE FROM accounts WHERE id = ?').bind(a.id).run();
     }

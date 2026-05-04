@@ -2,18 +2,34 @@ import type { Env, Account, TrafficResult } from './types';
 import { getSettings, getSetting, updateAccountStatus, addLog } from './db';
 import { getTraffic, getInstanceStatus, controlInstance } from './aliyun-api';
 
+function isCredentialError(msg: string): boolean {
+  const normalized = msg.toLowerCase();
+  const codes = ['invalidaccesskeyid.notfound', 'invalidaccesskeyid', 'signaturedoesnotmatch',
+    'incompletesignature', 'forbidden.accesskeydisabled', 'invalidsecuritytoken.expired',
+    'invalidsecuritytoken.malformed', 'missingsecuritytoken'];
+  const match = normalized.match(/\[([^\]]+)\]/);
+  const code = match ? match[1].toLowerCase().trim() : '';
+  if (code && codes.includes(code)) return true;
+  const message = normalized.replace(/\[[^\]]+\]\s*/, '');
+  return message.includes('access key is not found')
+    || message.includes('access key id does not exist')
+    || message.includes('signature does not match')
+    || message.includes('incomplete signature')
+    || message.includes('accesskeydisabled');
+}
+
 async function safeGetTraffic(account: Account, env: Env): Promise<TrafficResult> {
   try {
     const v = await getTraffic(account);
     return { success: true, value: v, status: 'ok', message: '' };
   } catch (e: any) {
     const msg = e.message ?? '';
-    if (msg.includes('InvalidAccessKeyId') || msg.includes('SignatureDoesNotMatch')) {
-      await addLog(env.DB, 'error', `CDT auth error [${account.remark || account.instance_id}]: AK invalid`);
-      return { success: false, value: null, status: 'auth_error', message: 'AK invalid' };
-    }
     if (msg.includes('timeout') || msg.includes('cURL')) {
       return { success: false, value: null, status: 'timeout', message: 'CDT timeout' };
+    }
+    if (isCredentialError(msg)) {
+      await addLog(env.DB, 'error', `CDT auth error [${account.remark || account.instance_id}]: AK invalid`);
+      return { success: false, value: null, status: 'auth_error', message: 'AK invalid' };
     }
     return { success: false, value: null, status: 'sync_error', message: 'CDT sync failed' };
   }
@@ -43,6 +59,10 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
   if (traffic.status === 'auth_error') {
     metadata.protection_suspended = 1;
     metadata.protection_suspend_reason = 'credential_invalid';
+  } else if (account.protection_suspended && account.protection_suspend_reason === 'credential_invalid') {
+    metadata.protection_suspended = 0;
+    metadata.protection_suspend_reason = '';
+    metadata.protection_suspend_notified_at = 0;
   }
 
   const usedTraffic = traffic.success ? (traffic.value ?? 0) : (account.traffic_used);
@@ -51,6 +71,12 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
   const usagePercent = account.max_traffic > 0 ? (usedTraffic / account.max_traffic * 100) : 0;
   const overThreshold = usagePercent >= threshold;
   const overLimit = account.max_traffic > 0 && usedTraffic >= account.max_traffic;
+
+  // Clear schedule block when traffic is back within limits
+  if (traffic.success && usagePercent < threshold && account.schedule_blocked_by_traffic) {
+    await env.DB.prepare('UPDATE accounts SET schedule_blocked_by_traffic = 0 WHERE group_key = ?')
+      .bind(account.group_key).run();
+  }
 
   if ((overThreshold || overLimit) && thresholdAction === 'stop_and_notify' && !account.protection_suspended) {
     if (status === 'Running') {
