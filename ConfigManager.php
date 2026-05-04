@@ -149,14 +149,10 @@ class ConfigManager
         }
         return $this->deriveAccountGroupsFromAccounts();
     }
-
-
     public function getAccountGroupMetrics(): array
     {
         return $this->accountSync->getAccountGroupMetrics($this->accountsCache);
     }
-
-
     public function isInitialized()
     {
         return !empty($this->configCache['admin_password']);
@@ -328,10 +324,6 @@ class ConfigManager
 
         $this->saveSetting('ddns_cf_proxied', !empty($cloudflare['proxied']) ? '1' : '0');
     }
-
-
-
-
     private function deriveAccountGroupsFromAccounts()
     {
         $groups = [];
@@ -367,10 +359,6 @@ class ConfigManager
 
         return array_values($groups);
     }
-
-
-
-
     private function resolveNetworkMetadata($instance, $existingRow = null)
     {
         $eipAllocationId = trim((string) ($instance['eipAllocationId'] ?? ''));
@@ -415,8 +403,6 @@ class ConfigManager
         ]);
         $this->load();
     }
-
-
 
     public function deleteAccountById($id)
     {
