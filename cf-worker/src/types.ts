@@ -84,7 +84,7 @@ export interface JwtPayload {
 
 // === Env ===
 export interface Env {
-  DB: D1Database; KV: KVNamespace;
+  DB: D1Database;
   ENCRYPTION_KEY: string; JWT_SECRET: string;
 }
 

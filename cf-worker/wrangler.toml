@@ -8,9 +8,5 @@ binding = "DB"
 database_name = "ecs-control-db"
 database_id = ""
 
-[[kv_namespaces]]
-binding = "KV"
-id = ""
-
 [triggers]
 crons = ["* * * * *", "*/10 * * * *", "5 3 * * *"]
