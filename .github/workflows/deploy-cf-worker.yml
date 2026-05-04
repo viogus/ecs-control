@@ -26,15 +26,33 @@ jobs:
 
       - name: Init D1 (create if not exists, populate database_id)
         run: |
-          # Try to get UUID of existing DB via d1 info (text output)
-          uuid=$(npx wrangler d1 info ecs-control-db 2>&1 | grep -oE '[a-f0-9-]{36}' | head -1 || true)
-          # If not found, create the database
+          uuid=""
+          # Method 1: d1 list JSON output (most reliable)
+          npx wrangler d1 list --format json > /tmp/d1-list.json 2>/dev/null || true
+          uuid=$(node -e "
+            try {
+              const d=JSON.parse(require('fs').readFileSync('/tmp/d1-list.json','utf8'));
+              const arr=Array.isArray(d)?d:(d.result||[]);
+              const db=arr.find(x=>x.name==='ecs-control-db');
+              if(db) process.stdout.write(db.uuid||db.database_id||'');
+            } catch(e){}
+          ")
+
+          # Method 2: d1 info text output
+          if [ -z "$uuid" ]; then
+            echo "Trying d1 info..."
+            npx wrangler d1 info ecs-control-db > /tmp/d1-info.txt 2>&1 || true
+            cat /tmp/d1-info.txt
+            uuid=$(grep -oE '[a-f0-9-]{36}' /tmp/d1-info.txt | head -1 || true)
+          fi
+
+          # Method 3: create new (fails if exists, but output has UUID in error msg?)
           if [ -z "$uuid" ]; then
             echo "Creating D1 database ecs-control-db..."
-            output=$(npx wrangler d1 create ecs-control-db 2>&1) || true
-            echo "$output"
-            uuid=$(echo "$output" | grep -oE '[a-f0-9-]{36}' | head -1)
+            npx wrangler d1 create ecs-control-db 2>&1 | tee /tmp/d1-create.txt || true
+            uuid=$(grep -oE '[a-f0-9-]{36}' /tmp/d1-create.txt | head -1 || true)
           fi
+
           if [ -z "$uuid" ]; then
             echo "::error::Failed to get D1 database UUID"
             exit 1
