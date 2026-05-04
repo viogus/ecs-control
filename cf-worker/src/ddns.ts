@@ -10,12 +10,6 @@ export async function syncDdns(db: D1Database, accounts: Account[]): Promise<voi
   const proxied = await getSetting(db, 'ddns_cf_proxied', '0') === '1';
   if (!domain || !token) return;
 
-  const groupCounts: Record<string, number> = {};
-  for (const a of accounts) {
-    if (!a.instance_id || !a.public_ip) continue;
-    groupCounts[a.group_key] = (groupCounts[a.group_key] ?? 0) + 1;
-  }
-
   for (const a of accounts) {
     if (!a.instance_id) continue;
     const ip = a.public_ip_mode === 'eip' ? (a.eip_address || a.public_ip) : a.public_ip;

@@ -62,8 +62,18 @@ export default {
       const { password } = await req.json() as any;
       const hash = await getSetting(env.DB, 'admin_password', '');
       if (!hash) return jsonResponse({ success: false, message: '未初始化' }, 403);
+
+      // Rate limiting: max 10 attempts per IP per 15 minutes
+      const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
+      const cutoff = Math.floor(Date.now() / 1000) - 900;
+      const recentAttempts = await env.DB.prepare('SELECT COUNT(*) as cnt FROM login_attempts WHERE ip = ? AND attempt_time > ?').bind(ip, cutoff).first<{cnt:number}>();
+      if ((recentAttempts?.cnt ?? 0) >= 10) return jsonResponse({ success: false, message: '登录尝试过于频繁，请15分钟后重试' }, 429);
+
       const valid = await verifyPassword(password, hash);
-      if (!valid) return jsonResponse({ success: false, message: '密码错误' });
+      if (!valid) {
+        await env.DB.prepare('INSERT INTO login_attempts (ip, attempt_time) VALUES (?, ?)').bind(ip, Math.floor(Date.now() / 1000)).run();
+        return jsonResponse({ success: false, message: '密码错误' });
+      }
       const csrf = generateCsrfToken();
       const token = await signJwt({ role: 'admin', csrf_token: csrf }, env.JWT_SECRET);
       return jsonResponse({ success: true, token, csrf_token: csrf });

@@ -3,13 +3,16 @@ import { getSetting } from './db';
 export async function sendEmail(db: D1Database, subject: string, body: string): Promise<boolean> {
   const enabled = await getSetting(db, 'notify_email_enabled', '1') === '1';
   if (!enabled) return true;
+  const toEmail = await getSetting(db, 'notify_email', '');
+  if (!toEmail) return true;
+  const fromEmail = toEmail;
   try {
     const res = await fetch('https://api.mailchannels.net/tx/v1/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        personalizations: [{ to: [{ email: await getSetting(db, 'notify_email', '') }] }],
-        from: { email: 'ecs-control@mailchannels.net', name: 'ECS Controller' },
+        personalizations: [{ to: [{ email: toEmail }] }],
+        from: { email: fromEmail, name: 'ECS Controller' },
         subject,
         content: [{ type: 'text/plain', value: body }],
       }),
