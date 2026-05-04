@@ -26,27 +26,30 @@ jobs:
 
       - name: Init D1 (create if not exists, populate database_id)
         run: |
-          get_uuid() {
-            npx wrangler d1 list --format json 2>/dev/null | node -e "
-              const s=require('fs').readFileSync(0,'utf8');
-              try {
-                const dbs=JSON.parse(s);
-                const db=dbs.find(d=>d.name==='ecs-control-db');
-                if (db) process.stdout.write(db.uuid||'');
-              } catch(e){}
-            "
-          }
-          uuid=$(get_uuid)
+          # Try to find existing D1 (handle both JSON array and {result: [...]} wrappers)
+          uuid=$(npx wrangler d1 list --format json 2>/dev/null | node -e "
+            let s='';
+            process.stdin.on('data',c=>s+=c);
+            process.stdin.on('end',()=>{
+              try{
+                const d=JSON.parse(s);
+                const arr=Array.isArray(d)?d:(d.result||[]);
+                const db=arr.find(x=>x.name==='ecs-control-db');
+                if(db) process.stdout.write(db.uuid||db.database_id||'');
+              }catch(e){}
+            })
+          ")
           if [ -z "$uuid" ]; then
             echo "Creating D1 database ecs-control-db..."
-            npx wrangler d1 create ecs-control-db 2>&1 || echo "(create may have failed, checking list...)"
-            uuid=$(get_uuid)
+            output=$(npx wrangler d1 create ecs-control-db 2>&1) || true
+            echo "$output"
+            uuid=$(echo "$output" | grep -oE '[a-f0-9-]{36}' | head -1)
           fi
           if [ -z "$uuid" ]; then
-            echo "::error::Failed to create D1 database. Check that CF_API_TOKEN has D1:Edit permission."
+            echo "::error::Failed to get D1 database UUID"
             exit 1
           fi
-          echo "D1 database UUID: $uuid"
+          echo "D1 UUID: $uuid"
           sed -i "s/database_id = \"\"/database_id = \"$uuid\"/" wrangler.toml
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
