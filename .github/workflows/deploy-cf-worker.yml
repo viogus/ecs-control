@@ -26,19 +26,19 @@ jobs:
 
       - name: Init D1 (create if not exists, populate database_id)
         run: |
-          # Try to find existing D1 (handle both JSON array and {result: [...]} wrappers)
-          uuid=$(npx wrangler d1 list --format json 2>/dev/null | node -e "
-            let s='';
-            process.stdin.on('data',c=>s+=c);
-            process.stdin.on('end',()=>{
-              try{
-                const d=JSON.parse(s);
-                const arr=Array.isArray(d)?d:(d.result||[]);
-                const db=arr.find(x=>x.name==='ecs-control-db');
-                if(db) process.stdout.write(db.uuid||db.database_id||'');
-              }catch(e){}
-            })
-          ")
+          uuid=""
+          # First, try to get UUID of existing DB via d1 info
+          info=$(npx wrangler d1 info ecs-control-db --format json 2>/dev/null || true)
+          if [ -n "$info" ]; then
+            uuid=$(echo "$info" | node -e "
+              let s='';
+              process.stdin.on('data',c=>s+=c);
+              process.stdin.on('end',()=>{
+                try{const d=JSON.parse(s);process.stdout.write(d.uuid||'')}catch(e){}
+              })
+            ")
+          fi
+          # If not found, create the database
           if [ -z "$uuid" ]; then
             echo "Creating D1 database ecs-control-db..."
             output=$(npx wrangler d1 create ecs-control-db 2>&1) || true
