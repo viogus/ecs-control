@@ -116,6 +116,7 @@ export async function getBillOverview(account: Account, billingCycle: string): P
 }
 
 // === CMS (CloudMonitor) ===
+// Reserved for per-instance traffic tracking. Currently CDT getTraffic() covers total account traffic.
 export async function getInstanceOutboundBytes(account: Account, startMs: number, endMs: number): Promise<number> {
   let total = 0;
   let cursor = startMs;

@@ -25,12 +25,13 @@ cmd_init() {
     info "D1 数据库 '$D1_NAME' 已存在"
     # fetch existing uuid and write to toml
     local uuid
-    uuid=$($WRANGLER d1 list --format json 2>/dev/null | python3 -c "
+    uuid=$($WRANGLER d1 list --json 2>/dev/null | python3 -c "
 import sys, json
-dbs = json.load(sys.stdin)
+raw = json.load(sys.stdin)
+dbs = raw if isinstance(raw, list) else raw.get('result', [])
 for db in dbs:
     if db.get('name') == '$D1_NAME':
-        print(db.get('uuid', ''))
+        print(db.get('uuid', db.get('database_id', '')))
     ")
     if [ -n "$uuid" ]; then
       sed -i '' "s/database_id = \"\"/database_id = \"$uuid\"/" wrangler.toml
@@ -41,19 +42,7 @@ for db in dbs:
     local output
     output=$($WRANGLER d1 create "$D1_NAME" 2>&1)
     local uuid
-    uuid=$(echo "$output" | grep -o 'database_id: [a-f0-9-]*' | cut -d' ' -f2)
-    if [ -z "$uuid" ]; then
-      uuid=$(echo "$output" | python3 -c "
-import sys, json
-for line in sys.stdin:
-    try:
-        d = json.loads(line)
-        if d.get('success'):
-            print(d['result']['uuid'])
-            break
-    except: pass
-    " 2>/dev/null || true)
-    fi
+    uuid=$(echo "$output" | grep -oE '[a-f0-9-]{36}' | head -1 || true)
     if [ -z "$uuid" ]; then
       err "无法从 wrangler 输出中提取 database_id"
       echo "$output"
@@ -84,7 +73,7 @@ cmd_secrets() {
 
   # Check if secrets already set on Cloudflare
   local existing
-  existing=$($WRANGLER secret list --format json 2>/dev/null | python3 -c "
+  existing=$($WRANGLER secret list --json 2>/dev/null | python3 -c "
 import sys, json
 try:
     secrets = json.load(sys.stdin)
