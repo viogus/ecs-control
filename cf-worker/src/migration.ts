@@ -44,7 +44,7 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   // Import accounts (with re-encryption of secrets)
   for (const acc of data.accounts) {
     const secret = acc.access_key_secret ? await encrypt(String(acc.access_key_secret), encKey) : '';
-    await db.prepare(`INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,instance_status,remark,site_type,group_key,instance_name,instance_type,internet_max_bandwidth_out,public_ip,public_ip_mode,eip_allocation_id,eip_address,eip_managed,cpu,memory,os_name,schedule_enabled,start_time,stop_time,schedule_blocked_by_traffic,traffic_billing_month) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    await db.prepare(`INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,instance_status,remark,site_type,group_key,instance_name,instance_type,internet_max_bandwidth_out,public_ip,public_ip_mode,eip_allocation_id,eip_address,eip_managed,cpu,memory,os_name,schedule_enabled,schedule_start_enabled,schedule_stop_enabled,start_time,stop_time,schedule_blocked_by_traffic,traffic_billing_month) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(
         acc.access_key_id, secret, acc.region_id, acc.instance_id || '',
         acc.max_traffic || 0, acc.instance_status || 'Unknown',
@@ -53,7 +53,8 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
         acc.public_ip || '', acc.public_ip_mode || 'ecs_public_ip',
         acc.eip_allocation_id || '', acc.eip_address || '', acc.eip_managed ? 1 : 0,
         acc.cpu || 0, acc.memory || 0, acc.os_name || '',
-        acc.schedule_enabled ? 1 : 0, acc.start_time || '', acc.stop_time || '',
+        acc.schedule_enabled ? 1 : 0, acc.schedule_start_enabled ? 1 : 0, acc.schedule_stop_enabled ? 1 : 0,
+        acc.start_time || '', acc.stop_time || '',
         acc.schedule_blocked_by_traffic ? 1 : 0, new Date().toISOString().substring(0, 7)
       ).run();
   }
