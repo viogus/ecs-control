@@ -2915,6 +2915,16 @@
                             </div>
                         </div>
 
+                        <div class="mt-6">
+                            <p class="subtle-label">数据迁移</p>
+                            <h3 class="mt-1 text-lg font-bold">导出配置</h3>
+                            <p class="mt-1 text-sm leading-5 text-[var(--muted)]">将所有设置和账号数据导出为 JSON，用于迁移到 Cloudflare Worker 或其他实例。</p>
+                            <div class="mt-3 flex flex-wrap gap-3">
+                                <button @click="exportJson" class="solid-button" :disabled="exporting">{{ exporting ? '导出中...' : '导出 JSON' }}</button>
+                                <a v-if="exportData" :href="exportDataUrl" :download="exportDataFilename" class="ghost-button" ref="exportLink">下载 JSON</a>
+                            </div>
+                        </div>
+
                     </section>
 
                     <section v-if="currentMenu === 'logs' && isAdmin" class="glass-panel section-panel">
@@ -3845,6 +3855,10 @@
                 const fetchingAllInstances = ref(false);
                 const syncingInstances = ref(false);
                 const refreshingInstanceIds = ref([]);
+                const exporting = ref(false);
+                const exportData = ref(null);
+                const exportDataUrl = ref('');
+                const exportDataFilename = ref('');
                 const accountSyncStates = ref({});
                 const accountSyncResults = ref({});
                 const scheduleRestoreStates = ref({});
@@ -5158,6 +5172,27 @@
                     }
                 };
 
+                const exportJson = async () => {
+                    exporting.value = true;
+                    exportData.value = null;
+                    exportDataUrl.value = '';
+                    exportDataFilename.value = '';
+                    try {
+                        const res = await fetch('index.php?action=export');
+                        const data = await res.json();
+                        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                        exportDataUrl.value = URL.createObjectURL(blob);
+                        exportDataFilename.value = `ecs-control-export-${new Date().toISOString().substring(0, 10)}.json`;
+                        exportData.value = data;
+                        openAlert('导出成功，点击"下载 JSON"按钮保存文件', 'success');
+                    } catch (error) {
+                        console.error(error);
+                        openAlert('导出失败：' + (error.message || '未知错误'), 'error');
+                    } finally {
+                        exporting.value = false;
+                    }
+                };
+
                 const performLogin = async () => {
                     try {
                         const res = await fetch('index.php?action=login', {
@@ -5432,6 +5467,10 @@
                     testingTelegram,
                     testingWebhook,
                     uploadingLogo,
+                    exporting,
+                    exportData,
+                    exportDataUrl,
+                    exportDataFilename,
                     checkingLogin,
                     closeAccountModal,
                     dialogState,
@@ -5487,6 +5526,7 @@
                     sendTestEmail,
                     sendTestTelegram,
                     sendTestWebhook,
+                    exportJson,
                     fetchLogs,
                     clearLogs
                 };
