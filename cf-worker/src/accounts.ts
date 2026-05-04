@@ -28,6 +28,7 @@ export async function getGroupsFromSettings(db: D1Database): Promise<AccountGrou
       scheduleStopEnabled: !!(g.scheduleStopEnabled ?? false),
       startTime: g.startTime ?? '',
       stopTime: g.stopTime ?? '',
+      scheduleBlockedByTraffic: !!(g.scheduleBlockedByTraffic ?? false),
     })));
   } catch { return []; }
 }

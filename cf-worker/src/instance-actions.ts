@@ -1,12 +1,14 @@
 import type { Account } from './types';
 import { addLog, getAccountById } from './db';
 import { controlInstance, deleteInstance } from './aliyun-api';
+import { decrypt, isEncrypted } from './crypto';
 
-export async function doControl(db: D1Database, accountId: number, action: 'start' | 'stop', shutdownMode = 'KeepCharging'): Promise<boolean> {
+export async function doControl(db: D1Database, encKey: string, accountId: number, action: 'start' | 'stop', shutdownMode = 'KeepCharging'): Promise<boolean> {
   const acc = await getAccountById(db, accountId);
   if (!acc) return false;
   try {
-    await controlInstance(acc, action, shutdownMode);
+    const secret = isEncrypted(acc.access_key_secret) ? await decrypt(acc.access_key_secret, encKey) : acc.access_key_secret;
+    await controlInstance({ ...acc, access_key_secret: secret }, action, shutdownMode);
     await addLog(db, 'info', `Instance ${action} OK [${acc.remark || acc.instance_id}]`);
     await db.prepare('UPDATE accounts SET instance_status=?, updated_at=? WHERE id=?')
       .bind(action === 'stop' ? 'Stopping' : 'Starting', Math.floor(Date.now() / 1000), accountId).run();

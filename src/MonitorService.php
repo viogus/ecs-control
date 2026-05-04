@@ -219,16 +219,8 @@ class MonitorService
         try {
             return $this->aliyunService->getInstanceStatus($account);
         } catch (\Exception $e) {
+            $this->db->addLog('warning', "实例状态查询失败 [" . Helpers::getAccountLogLabel($account) . "]: " . strip_tags($e->getMessage()));
             return 'Unknown';
-        }
-    }
-
-    private function safeGetInstanceFullStatus($account)
-    {
-        try {
-            return $this->aliyunService->getInstanceFullStatus($account);
-        } catch (\Exception $e) {
-            return null;
         }
     }
 
@@ -237,13 +229,13 @@ class MonitorService
         try {
             return $this->aliyunService->controlInstance($account, $action, $shutdownMode);
         } catch (ClientException $e) {
-            $this->db->addLog('error', "实例操作失败 [{$action}]: 权限不足或配置错误");
+            $this->db->addLog('error', "实例操作失败 [{$action}]: 权限不足或配置错误 (" . $e->getErrorCode() . ")");
             return false;
         } catch (ServerException $e) {
-            $this->db->addLog('error', "实例操作失败 [{$action}]: " . $e->getErrorCode() . " - " . $e->getErrorMessage());
+            $this->db->addLog('error', "实例操作失败 [{$action}]: " . $e->getErrorCode() . " - " . strip_tags($e->getErrorMessage()));
             return false;
         } catch (\Exception $e) {
-            $this->db->addLog('error', "实例操作失败 [{$action}]: 无法连接接口");
+            $this->db->addLog('error', "实例操作失败 [{$action}]: " . strip_tags($e->getMessage()));
             return false;
         }
     }

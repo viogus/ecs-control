@@ -34,7 +34,7 @@ async function requireCsrf(req: Request, jwt: JwtPayload): Promise<boolean> {
 }
 
 const WRITE_ACTIONS = new Set([
-  'save-config', 'upload-logo', 'refresh-account', 'sync-group',
+  'save-config', 'upload-logo', 'refresh-account',
   'restore-schedule', 'control', 'delete', 'replace-ip',
   'preview-create', 'disk-options', 'create-ecs',
   'clear-logs', 'send-test-email', 'send-test-tg', 'send-test-wh',
@@ -139,7 +139,7 @@ export default {
 
       if (path === '/api/control' && req.method === 'POST') {
         const { accountId, action, shutdownMode } = body;
-        const ok = await doControl(env.DB, accountId, action, shutdownMode);
+        const ok = await doControl(env.DB, env.ENCRYPTION_KEY, accountId, action, shutdownMode);
         return jsonResponse({ success: ok });
       }
 

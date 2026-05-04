@@ -426,7 +426,7 @@ class AliyunTrafficCheck
             throw new Exception('阿里云接口错误 [' . $e->getErrorCode() . ']: ' . $e->getErrorMessage());
         } catch (\Exception $e) {
             $this->db->addLog('warning', "实例列表获取失败: " . strip_tags($e->getMessage()));
-            throw $e;
+            throw new Exception('实例列表获取失败: 网络或系统错误');
         }
     }
 
@@ -833,6 +833,7 @@ class AliyunTrafficCheck
 
         $context = stream_context_create(['http' => ['timeout' => 3]]);
         $externalIp = @file_get_contents('https://api.ipify.org', false, $context);
+        if ($externalIp === false) return '';
         $externalIp = trim((string) $externalIp);
         if (filter_var($externalIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
             return $externalIp;

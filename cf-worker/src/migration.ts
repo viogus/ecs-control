@@ -1,5 +1,5 @@
 import type { MigrationExport } from './types';
-import { encrypt } from './crypto';
+import { encrypt, isEncrypted } from './crypto';
 import { saveSetting } from './db';
 
 export async function importFromDocker(db: D1Database, encKey: string, data: MigrationExport): Promise<void> {
@@ -43,7 +43,9 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
 
   // Import accounts (with re-encryption of secrets)
   for (const acc of data.accounts) {
-    const secret = acc.access_key_secret ? await encrypt(String(acc.access_key_secret), encKey) : '';
+    const secret = acc.access_key_secret && !isEncrypted(String(acc.access_key_secret))
+      ? await encrypt(String(acc.access_key_secret), encKey)
+      : String(acc.access_key_secret ?? '');
     await db.prepare(`INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,instance_status,remark,site_type,group_key,instance_name,instance_type,internet_max_bandwidth_out,public_ip,public_ip_mode,eip_allocation_id,eip_address,eip_managed,cpu,memory,os_name,schedule_enabled,schedule_start_enabled,schedule_stop_enabled,start_time,stop_time,schedule_blocked_by_traffic,traffic_billing_month) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(
         acc.access_key_id, secret, acc.region_id, acc.instance_id || '',

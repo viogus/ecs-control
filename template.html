@@ -4380,9 +4380,12 @@
                         const data = await res.json();
                         if (data.success) {
                             fetchLogs();
+                        } else {
+                            openAlert('清空日志失败', 'error');
                         }
                     } catch (error) {
                         console.error('Clear logs failed', error);
+                        openAlert('清空日志请求失败', 'error');
                     }
                 };
 

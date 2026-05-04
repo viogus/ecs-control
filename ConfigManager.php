@@ -330,56 +330,7 @@ class ConfigManager
     }
 
 
-    private function resolveExistingSecret($accessKeyId, $regionId, $groupKey = '')
-    {
-        $accessKeyId = trim((string) $accessKeyId);
-        $regionId = trim((string) $regionId);
-        $requestedGroupKey = trim((string) $groupKey);
 
-        if ($requestedGroupKey !== '') {
-            foreach ($this->accountsCache as $row) {
-                if (($row['group_key'] ?? '') === $requestedGroupKey && !empty($row['access_key_secret'])) {
-                    return $row['access_key_secret'];
-                }
-            }
-        }
-
-        foreach ($this->accountsCache as $row) {
-            if ($row['access_key_id'] === $accessKeyId && $row['region_id'] === $regionId) {
-                return $row['access_key_secret'];
-            }
-        }
-
-        $derivedGroupKey = AccountSyncService::buildGroupKey($accessKeyId, $regionId);
-        foreach ($this->accountsCache as $row) {
-            if (($row['group_key'] === $derivedGroupKey) && !empty($row['access_key_secret'])) {
-                return $row['access_key_secret'];
-            }
-        }
-
-        $rawGroups = json_decode((string) ($this->configCache['account_groups'] ?? ''), true);
-        if (is_array($rawGroups)) {
-            foreach ($rawGroups as $group) {
-                $savedGroupKey = trim((string) ($group['groupKey'] ?? ''));
-                $savedAccessKeyId = trim((string) ($group['AccessKeyId'] ?? ''));
-                $savedRegionId = trim((string) ($group['regionId'] ?? ''));
-                $savedSecret = trim((string) ($group['AccessKeySecret'] ?? ''));
-
-                if (
-                    (
-                        ($requestedGroupKey !== '' && $savedGroupKey === $requestedGroupKey)
-                        || ($savedAccessKeyId === $accessKeyId && $savedRegionId === $regionId)
-                    )
-                    && $savedSecret !== ''
-                    && $savedSecret !== '********'
-                ) {
-                    return $savedSecret;
-                }
-            }
-        }
-
-        return '';
-    }
 
     private function deriveAccountGroupsFromAccounts()
     {
@@ -465,41 +416,7 @@ class ConfigManager
         $this->load();
     }
 
-    private function updateGroupBaseSettings($groupKey, $group)
-    {
-        $stmt = $this->db->prepare("
-            UPDATE accounts
-            SET access_key_id = ?,
-                access_key_secret = ?,
-                region_id = ?,
-                max_traffic = ?,
-                schedule_enabled = ?,
-                schedule_start_enabled = ?,
-                schedule_stop_enabled = ?,
-                start_time = ?,
-                stop_time = ?,
-                schedule_blocked_by_traffic = ?,
-                site_type = ?,
-                group_key = ?
-            WHERE group_key = ?
-        ");
 
-        $stmt->execute([
-            $group['AccessKeyId'],
-            $this->encryptValue($group['AccessKeySecret']),
-            $group['regionId'],
-            $group['maxTraffic'],
-            !empty($group['scheduleEnabled']) ? 1 : 0,
-            !empty($group['scheduleStartEnabled']) ? 1 : 0,
-            !empty($group['scheduleStopEnabled']) ? 1 : 0,
-            $group['startTime'] ?? '',
-            $group['stopTime'] ?? '',
-            !empty($group['scheduleBlockedByTraffic']) ? 1 : 0,
-            $group['siteType'],
-            $groupKey,
-            $groupKey
-        ]);
-    }
 
     public function deleteAccountById($id)
     {

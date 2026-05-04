@@ -340,12 +340,8 @@ class AliyunService
                 }
             }
 
-            // 如果没找到匹配的 ID，且返回了列表（说明过滤参数没生效），且当前账号只有一个实例 ID，则抛出异常
-            if (empty($statuses) || count($statuses) > 1) {
-                throw new \Exception("API 响应未找到匹配的实例状态 (ID: {$account['instance_id']})");
-            }
-
-            return 'Unknown';
+            // If no match found, throw regardless of result count
+            throw new \Exception("API 响应未找到匹配的实例状态 (ID: {$account['instance_id']})");
         }, 'getInstanceStatus');
     }
 
@@ -1164,42 +1160,6 @@ class AliyunService
         return ['SecurityGroupId' => $result['SecurityGroupId'] ?? '', 'SecurityGroupName' => $name];
     }
 
-    private function authorizeSecurityGroupRule($key, $secret, $regionId, $securityGroupId, $port, $sourceCidrIp)
-    {
-        try {
-            RetryHandler::execute(function () use ($key, $secret, $regionId, $securityGroupId, $port, $sourceCidrIp) {
-                $this->setDefaultClient($key, $secret, $regionId);
-
-                return AlibabaCloud::rpc()
-                    ->product('Ecs')
-                    ->scheme('https')
-                    ->version('2014-05-26')
-                    ->action('AuthorizeSecurityGroup')
-                    ->method('POST')
-                    ->host($this->ecsHost($regionId))
-                    ->options([
-                        'query' => [
-                            'RegionId' => $regionId,
-                            'SecurityGroupId' => $securityGroupId,
-                            'IpProtocol' => 'tcp',
-                            'PortRange' => "{$port}/{$port}",
-                            'SourceCidrIp' => $sourceCidrIp,
-                            'Policy' => 'accept',
-                            'Priority' => '1',
-                            'Description' => 'CDT Monitor managed remote access'
-                        ],
-                        'connect_timeout' => 5.0,
-                        'timeout' => 15.0
-                    ])
-                    ->request();
-            }, 'authorizeSecurityGroupRule');
-        } catch (\Exception $e) {
-            if (stripos($e->getMessage(), 'InvalidPermission.Duplicate') === false) {
-                throw $e;
-            }
-        }
-    }
-
     private function authorizeOpenSecurityGroupRules($key, $secret, $regionId, $securityGroupId)
     {
         $rules = [
@@ -1282,7 +1242,7 @@ class AliyunService
                     'timeout' => 25.0
                 ])
                 ->request();
-        }, 'runInstance', 1);
+        }, 'runInstance', 2);
 
         return $result['InstanceIdSets']['InstanceIdSet'] ?? [];
     }
@@ -1452,7 +1412,7 @@ class AliyunService
             $this->waitEipStatus($key, $secret, $regionId, $allocationId, 'Available', 6);
             $this->releaseEipAddress($key, $secret, $regionId, $allocationId);
         } catch (\Exception $e) {
-            // 创建失败回滚场景不覆盖原始错误，后台日志由调用方记录。
+            error_log("EIP release rollback failed [{$allocationId}]: " . $e->getMessage());
         }
     }
 
@@ -1496,7 +1456,7 @@ class AliyunService
             }
         }
 
-        return $last;
+        throw new \Exception("EIP 状态等待超时: {$targetStatus}");
     }
 
     public function releaseManagedEip($account)
@@ -1565,7 +1525,7 @@ class AliyunService
             }
         }
 
-        return $last ?: ['status' => 'Unknown'];
+        throw new \Exception("实例创建超时，等待实例状态就绪超时 90 秒");
     }
 
     private function describeInstancesByIds($key, $secret, $regionId, array $instanceIds)
@@ -1773,7 +1733,8 @@ class AliyunService
         $message = strtolower((string) $message);
         return strpos($message, 'systemdisk.size') !== false
             || strpos($message, 'invalidsystemdisksize') !== false
-            || (strpos($message, 'disk') !== false && strpos($message, 'size') !== false);
+            || strpos($message, 'invaliddatadisksize') !== false
+            || strpos($message, 'disk size') !== false;
     }
 
     private function selectDiskCategory($zone, $requested = 'cloud_essd_entry')
@@ -1823,15 +1784,6 @@ class AliyunService
             array_unshift($candidates, $max);
         }
         return array_values(array_unique($candidates));
-    }
-
-    private function normalizePublicCidr($ip)
-    {
-        $ip = trim((string) $ip);
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-            return $ip . '/32';
-        }
-        return '';
     }
 
     private function cidrForZone($zoneId)
