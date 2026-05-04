@@ -4267,7 +4267,7 @@
                             statusInstances.value = json.data || [];
                             statusSyncInterval.value = Number(json.sync_interval || statusSyncInterval.value || 600);
                             const now = Math.floor(Date.now() / 1000);
-                            cronWarning.value = json.system_last_run ? (now - json.system_last_run) > 180 : statusInstances.value.length > 0;
+                            cronWarning.value = json.system_last_run ? (now - json.system_last_run) > 300 : statusInstances.value.length > 0;
                             if (restartPolling) {
                                 startStatusPolling();
                             }
@@ -5397,6 +5397,11 @@
 
                 onMounted(() => {
                     checkInitStatus();
+                    document.addEventListener('visibilitychange', () => {
+                        if (document.visibilityState === 'visible') {
+                            fetchStatusData(false);
+                        }
+                    });
                 });
 
                 onUnmounted(() => {
