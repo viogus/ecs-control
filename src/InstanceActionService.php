@@ -32,23 +32,25 @@ class InstanceActionService
         try {
             $result = $this->aliyunService->controlInstance($targetAccount, $action, $shutdownMode);
             if ($result) {
-                $this->db->addLog('info', "实例操作 [{$action}] 成功 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']}");
+                $label = Helpers::getAccountLogLabel($targetAccount);
+                $instId = $targetAccount->instanceId;
+                $this->db->addLog('info', "实例操作 [{$action}] 成功 [{$label}] {$instId}");
                 $newStatus = $action === 'stop' ? 'Stopping' : 'Starting';
-                $this->configManager->updateAccountStatus($accountId, $targetAccount['traffic_used'], $newStatus, time());
+                $this->configManager->updateAccountStatus($accountId, $targetAccount->trafficUsed, $newStatus, time());
                 $this->configManager->updateAutoStartBlocked($accountId, $action === 'stop');
                 if ($action === 'start' && $waitForSync) {
                     sleep(8);
                     $this->configManager->syncAccountGroups(true);
                     $this->configManager->load();
                     $syncedAccount = $this->configManager->getAccountById($accountId);
-                    if (($syncedAccount['instance_status'] ?? '') === 'Running' && $onStatusChanged) {
-                        $onStatusChanged($syncedAccount, $targetAccount['instance_status'] ?? 'Unknown', 'Running', '用户手动启动成功。');
+                    if ($syncedAccount && $syncedAccount->instanceStatus === 'Running' && $onStatusChanged) {
+                        $onStatusChanged($syncedAccount, $targetAccount->instanceStatus, 'Running', '用户手动启动成功。');
                     }
                     $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), '实例启动后');
                 }
             }
             return $result;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $code = $e instanceof \AlibabaCloud\Client\Exception\ClientException ? 'ClientException' : ($e instanceof \AlibabaCloud\Client\Exception\ServerException ? 'ServerException' : 'Exception');
             $this->db->addLog('error', "实例操作失败 [{$action}]: " . strip_tags($e->getMessage()));
             return false;
@@ -60,7 +62,7 @@ class InstanceActionService
         $targetAccount = $this->configManager->getAccountById($accountId);
         if (!$targetAccount) return false;
 
-        $this->db->addLog('warning', "操作成功：秒级标记释放指令已提交，后台安全队列正在接管 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']}");
+        $this->db->addLog('warning', "操作成功：秒级标记释放指令已提交，后台安全队列正在接管 [{$targetAccount->instanceId}]");
         $this->configManager->markAccountAsDeleted($accountId);
         return true;
     }
@@ -70,10 +72,11 @@ class InstanceActionService
         $targetAccount = $this->configManager->getAccountById($accountId);
         if (!$targetAccount) return ['success' => false, 'message' => '实例不存在'];
 
-        if (($targetAccount['public_ip_mode'] ?? '') !== 'eip' || empty($targetAccount['eip_managed'])) {
+        if ($targetAccount->publicIpMode !== 'eip' || !$targetAccount->eipManaged) {
             return ['success' => false, 'message' => '当前实例不是系统托管 EIP，无法更换公网 IP'];
         }
 
+        $label = Helpers::getAccountLogLabel($targetAccount);
         try {
             $oldIp = $targetAccount['public_ip'] ?? '';
             $result = $this->aliyunService->replaceManagedEip($targetAccount);
@@ -83,17 +86,18 @@ class InstanceActionService
                 'eip_allocation_id' => $result['eipAllocationId'] ?? '',
                 'eip_address' => $result['eipAddress'] ?? '',
                 'eip_managed' => 1,
-                'internet_max_bandwidth_out' => $result['internetMaxBandwidthOut'] ?? ($targetAccount['internet_max_bandwidth_out'] ?? 0)
+                'internet_max_bandwidth_out' => $result['internetMaxBandwidthOut'] ?? ($targetAccount->internetMaxBandwidthOut ?? 0)
             ]);
 
             $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), 'EIP 更换后');
             $newIp = $result['publicIp'] ?? '';
-            $this->db->addLog('info', "EIP 已更换 [{Helpers::getAccountLogLabel($targetAccount)}] {$targetAccount['instance_id']} {$oldIp} -> {$newIp}");
+            $instId = $targetAccount->instanceId;
+            $this->db->addLog('info', "EIP 已更换 [{$label}] {$instId} {$oldIp} -> {$newIp}");
             $notifyResult = $this->notificationService->notifyPublicIpChanged(
-                Helpers::getAccountLogLabel($targetAccount), $targetAccount, $oldIp, $newIp,
+                $label, $targetAccount, $oldIp, $newIp,
                 '用户在控制台手动更换公网 IP，DDNS 解析已同步更新。'
             );
-            Helpers::logNotificationResult($this->db, $notifyResult, Helpers::getAccountLogLabel($targetAccount));
+            Helpers::logNotificationResult($this->db, $notifyResult, $label);
 
             return ['success' => true, 'message' => '公网 IP 已更换',
                 'data' => [
@@ -102,8 +106,8 @@ class InstanceActionService
                     'eipAddress' => $result['eipAddress'] ?? '',
                     'internetMaxBandwidthOut' => $result['internetMaxBandwidthOut'] ?? 0
                 ]];
-        } catch (\Exception $e) {
-            $this->db->addLog('error', "EIP 更换失败 [{Helpers::getAccountLogLabel($targetAccount)}]: " . strip_tags($e->getMessage()));
+        } catch (\Throwable $e) {
+            $this->db->addLog('error', "EIP 更换失败 [{$label}]: " . strip_tags($e->getMessage()));
             return ['success' => false, 'message' => strip_tags($e->getMessage())];
         }
     }
