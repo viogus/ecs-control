@@ -118,11 +118,37 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
 
     <!-- Tab: Instance Config -->
     <div v-if="tab==='accounts'">
-      <div v-if="instances.length===0" class="card"><p style="color:#86868b">暂无实例</p></div>
+      <button class="btn btn-primary" @click="showAdd=!showAdd" style="margin-bottom:12px">{{ showAdd ? '取消' : '＋ 新建实例' }}</button>
+
+      <!-- Add form -->
+      <div v-if="showAdd" class="card">
+        <h2>新建实例</h2>
+        <div class="row">
+          <div class="form-group"><label>AccessKey ID *</label><input v-model="newAccount.access_key_id"></div>
+          <div class="form-group"><label>AccessKey Secret *</label><input v-model="newAccount.access_key_secret" type="password"></div>
+        </div>
+        <div class="row">
+          <div class="form-group"><label>区域</label><input v-model="newAccount.region_id" placeholder="cn-hongkong"></div>
+          <div class="form-group"><label>实例 ID</label><input v-model="newAccount.instance_id" placeholder="i-xxx"></div>
+        </div>
+        <div class="form-group"><label>备注名</label><input v-model="newAccount.remark" placeholder="自定义名称"></div>
+        <button class="btn btn-primary" @click="doAddAccount" :disabled="working">创建</button>
+      </div>
+
+      <!-- Empty state -->
+      <div v-if="!showAdd && instances.length===0" class="card" style="text-align:center;padding:40px">
+        <p style="color:#86868b;margin-bottom:16px">暂无实例配置</p>
+        <p style="font-size:13px;color:#a0a0a5">点击「＋ 新建实例」添加，或通过系统设置导入 JSON 批量导入</p>
+      </div>
+
+      <!-- Instance cards -->
       <div v-for="inst in instances" :key="'cfg-'+inst.id" class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
           <strong>{{ inst.remark || inst.instance_name || inst.instance_id }}</strong>
-          <span v-if="inst.schedule_blocked_by_traffic" style="color:#ff3b30;font-size:12px">流量熔断暂停</span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span v-if="inst.schedule_blocked_by_traffic" style="color:#ff3b30;font-size:12px">流量熔断</span>
+            <button class="btn btn-danger btn-sm" style="font-size:11px;padding:2px 8px" @click="doRemoveAccount(inst)">删除</button>
+          </div>
         </div>
         <div class="row">
           <div class="form-group"><label>AccessKey ID</label><input v-model="cfgForm[inst.id].access_key_id"></div>
@@ -280,7 +306,8 @@ createApp({
     ddns: { enabled: '0', domain: '', zoneId: '', token: '', proxied: '0' },
 
     // instance config forms
-    cfgForm: {},
+    cfgForm: {}, showAdd: false,
+    newAccount: { access_key_id: '', access_key_secret: '', region_id: '', instance_id: '', remark: '' },
   };},
 
   async mounted() {
@@ -393,6 +420,31 @@ createApp({
         } else this.toastMsg(d.message||'保存失败','error');
       } catch(e) { this.toastMsg('保存失败','error'); }
       finally { this.working = false; }
+    },
+    async doAddAccount() {
+      const f = this.newAccount;
+      if (!f.access_key_id) { this.toastMsg('请输入 AccessKey ID','error'); return; }
+      this.working = true;
+      try {
+        const d = await this.api('/api/add-account', {
+          access_key_id: f.access_key_id, access_key_secret: f.access_key_secret,
+          region_id: f.region_id, instance_id: f.instance_id, remark: f.remark,
+        });
+        if (d.success) {
+          this.toastMsg('已创建','success');
+          this.newAccount = { access_key_id: '', access_key_secret: '', region_id: '', instance_id: '', remark: '' };
+          this.showAdd = false;
+          await this.fetchInstances();
+        } else this.toastMsg(d.message||'创建失败','error');
+      } catch(e) { this.toastMsg('创建失败','error'); }
+      finally { this.working = false; }
+    },
+    async doRemoveAccount(inst) {
+      if (!confirm(\`确认删除 \${inst.remark||inst.instance_id||inst.access_key_id}？此操作不可恢复。\`)) return;
+      const d = await this.api('/api/remove-account', { id: inst.id });
+      if (!d.success) { this.toastMsg(d.message||'删除失败','error'); return; }
+      this.toastMsg('已删除','success');
+      await this.fetchInstances();
     },
     async doControl(id, action) {
       const d = await this.api('/api/control', { accountId: id, action, shutdownMode: this.cfg.shutdown_mode || 'KeepCharging' });

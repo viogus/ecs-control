@@ -38,7 +38,7 @@ const WRITE_ACTIONS = new Set([
   'restore-schedule', 'control', 'delete', 'replace-ip',
   'preview-create', 'disk-options', 'create-ecs',
   'clear-logs', 'send-test-email', 'send-test-tg', 'send-test-wh',
-  'export', 'import', 'schedule', 'save-account',
+  'export', 'import', 'schedule', 'save-account', 'add-account', 'remove-account',
 ]);
 
 export default {
@@ -319,6 +319,24 @@ export default {
           ? [String(access_key_id || ''), secret, String(instance_id || ''), String(region_id || ''), String(remark || ''), schedule_enabled ? 1 : 0, schedule_start_enabled ? 1 : 0, schedule_stop_enabled ? 1 : 0, String(start_time || ''), String(stop_time || ''), id]
           : [String(access_key_id || ''), String(instance_id || ''), String(region_id || ''), String(remark || ''), schedule_enabled ? 1 : 0, schedule_start_enabled ? 1 : 0, schedule_stop_enabled ? 1 : 0, String(start_time || ''), String(stop_time || ''), id];
         await env.DB.prepare(`UPDATE accounts SET ${setSql} WHERE id=?`).bind(...params).run();
+        return jsonResponse({ success: true });
+      }
+
+      // ── add-account: create new account row ──
+      if (path === '/api/add-account' && req.method === 'POST') {
+        const { access_key_id, access_key_secret, region_id, instance_id, remark, schedule_enabled, schedule_start_enabled, schedule_stop_enabled, start_time, stop_time } = body;
+        if (!access_key_id) return jsonResponse({ success: false, message: '缺少 AccessKey ID' });
+        const secret = String(access_key_secret || '') ? await encrypt(String(access_key_secret), env.ENCRYPTION_KEY) : '';
+        await env.DB.prepare(`INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,remark,site_type,group_key,instance_name,instance_type,schedule_enabled,schedule_start_enabled,schedule_stop_enabled,start_time,stop_time,traffic_billing_month,instance_status) VALUES (?,?,?,?,200,?,?,?,?,?,?,?,?,?,?,?,'Unknown')`)
+          .bind(String(access_key_id), secret, String(region_id || ''), String(instance_id || ''), String(remark || ''), region_id&&region_id.startsWith('cn-')&&region_id!=='cn-hongkong'?'china':'international', '', '', '', schedule_enabled?1:0, schedule_start_enabled?1:0, schedule_stop_enabled?1:0, String(start_time||''), String(stop_time||''), new Date().toISOString().substring(0,7)).run();
+        return jsonResponse({ success: true });
+      }
+
+      // ── remove-account: hard delete account ──
+      if (path === '/api/remove-account' && req.method === 'POST') {
+        const { id } = body;
+        if (!id) return jsonResponse({ success: false, message: '缺少账号 ID' });
+        await env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
 
