@@ -261,7 +261,7 @@ class MonitorService
 
     // ---- Phase 1: 自适应心跳 ----
 
-    private function handleAdaptiveHeartbeat(array $account, int $currentTime, int $userInterval, array &$s): void
+    private function handleAdaptiveHeartbeat($account, int $currentTime, int $userInterval, array &$s): void
     {
         $lastUpdate = $account['updated_at'] ?? 0;
         $cachedStatus = $account['instance_status'] ?? 'Unknown';
@@ -337,7 +337,7 @@ class MonitorService
 
     // ---- Phase 2: 流量熔断 ----
 
-    private function handleTrafficCircuitBreaker(array $account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, array &$s): bool
+    private function handleTrafficCircuitBreaker($account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, array &$s): bool
     {
         $maxTraffic = $account['max_traffic'];
         $accountTraffic = $this->getGroupTrafficUsed($account);
@@ -405,7 +405,7 @@ class MonitorService
 
     // ---- Phase 3: 定时开关机 ----
 
-    private function handleScheduledOps(array $account, int $currentTime, string $shutdownMode, array &$s): void
+    private function handleScheduledOps($account, int $currentTime, string $shutdownMode, array &$s): void
     {
         $scheduleEnabled = !empty($account['schedule_enabled']);
         $scheduleStartEnabled = !empty($account['schedule_start_enabled']);
@@ -461,7 +461,7 @@ class MonitorService
 
     // ---- Phase 4: 每月自动开机 ----
 
-    private function handleMonthlyAutoStart(array $account, int $currentTime, bool $monthlyAutoStart, array &$s): void
+    private function handleMonthlyAutoStart($account, int $currentTime, bool $monthlyAutoStart, array &$s): void
     {
         $autoStartBlocked = !empty($account['auto_start_blocked']);
         if (!$monthlyAutoStart || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic'] || date('j', $currentTime) !== '1') {
@@ -488,7 +488,7 @@ class MonitorService
 
     // ---- Phase 5: 保活逻辑 ----
 
-    private function handleKeepAlive(array $account, int $currentTime, bool $keepAlive, array &$s): void
+    private function handleKeepAlive($account, int $currentTime, bool $keepAlive, array &$s): void
     {
         $autoStartBlocked = !empty($account['auto_start_blocked']);
         if (!$keepAlive || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false)) {
