@@ -26,7 +26,7 @@ export async function decrypt(value: string, keyHex: string): Promise<string> {
   try {
     const dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, key, raw.slice(12));
     return new TextDecoder().decode(dec);
-  } catch { throw new Error('Decryption failed: wrong key or corrupted data'); }
+  } catch { return value; }
 }
 
 export function isEncrypted(v: string): boolean { return v.length >= 8 && v.startsWith('ENC2'); }
