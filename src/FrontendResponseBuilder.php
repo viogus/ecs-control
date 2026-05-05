@@ -5,15 +5,18 @@ class FrontendResponseBuilder
     private ConfigManager $configManager;
     private Database $db;
     private AliyunService $aliyunService;
+    private BssService $bssService;
 
     public function __construct(
         ConfigManager $configManager,
         Database $db,
-        AliyunService $aliyunService
+        AliyunService $aliyunService,
+        BssService $bssService
     ) {
         $this->configManager = $configManager;
         $this->db = $db;
         $this->aliyunService = $aliyunService;
+        $this->bssService = $bssService;
     }
 
     public function getConfigForFrontend(): array
@@ -319,7 +322,7 @@ class FrontendResponseBuilder
             $costInfo['currency'] = $balanceCache['Currency'] ?? 'CNY';
         } else {
             try {
-                $balance = $this->aliyunService->getAccountBalance(
+                $balance = $this->bssService->getAccountBalance(
                     $account['access_key_id'], $account['access_key_secret'], $account['site_type'] ?? 'china'
                 );
                 $costInfo['balance'] = $balance['AvailableAmount'];
@@ -336,7 +339,7 @@ class FrontendResponseBuilder
                 $costInfo['monthly_cost'] = $billCache['TotalCost'];
             } else {
                 try {
-                    $bill = $this->aliyunService->getInstanceBill(
+                    $bill = $this->bssService->getInstanceBill(
                         $account['access_key_id'], $account['access_key_secret'],
                         $account['instance_id'], $billingCycle, $account['site_type'] ?? 'china'
                     );
@@ -391,7 +394,7 @@ class FrontendResponseBuilder
                     $summary['balance'] = $balanceCache['AvailableAmount'] ?? null;
                     $summary['currency'] = $balanceCache['Currency'] ?? $currency;
                 } else {
-                    $balance = $this->aliyunService->getAccountBalance(
+                    $balance = $this->bssService->getAccountBalance(
                         $row['access_key_id'], $row['access_key_secret'],
                         $row['site_type'] ?? ($group['siteType'] ?? 'international')
                     );
@@ -408,7 +411,7 @@ class FrontendResponseBuilder
                 if ($overviewCache) {
                     $summary['monthly_cost'] = $overviewCache['TotalCost'] ?? null;
                 } else {
-                    $overview = $this->aliyunService->getBillOverview(
+                    $overview = $this->bssService->getBillOverview(
                         $row['access_key_id'], $row['access_key_secret'], $billingCycle,
                         $row['site_type'] ?? ($group['siteType'] ?? 'international')
                     );

@@ -7,6 +7,8 @@ require_once 'AliyunService.php';
 require_once 'NotificationService.php';
 require_once 'DdnsService.php';
 require_once 'TelegramControlService.php';
+require_once 'src/EcsProvisionService.php';
+require_once 'src/BssService.php';
 
 use AlibabaCloud\Client\Exception\ClientException;
 use AlibabaCloud\Client\Exception\ServerException;
@@ -16,6 +18,8 @@ class AliyunTrafficCheck
     private $db;
     private $configManager;
     private $aliyunService;
+    private $ecsProvisionService;
+    private $bssService;
     private $notificationService;
     private $ddnsService;
     private $responseBuilder;
@@ -30,14 +34,16 @@ class AliyunTrafficCheck
             $this->db = new Database();
             $this->configManager = new ConfigManager($this->db);
             $this->aliyunService = new AliyunService();
+            $this->ecsProvisionService = new EcsProvisionService();
+            $this->bssService = new BssService();
             $this->notificationService = new NotificationService();
             $this->ddnsService = new DdnsService($this->configManager->getAllSettings(), $this->db, $this->configManager);
             $this->responseBuilder = new FrontendResponseBuilder(
-                $this->configManager, $this->db, $this->aliyunService
+                $this->configManager, $this->db, $this->aliyunService, $this->bssService
             );
             $this->instanceActionService = new InstanceActionService(
                 $this->aliyunService, $this->configManager, $this->db,
-                $this->notificationService, $this->ddnsService
+                $this->notificationService, $this->ddnsService, $this->bssService
             );
 
             // 注入配置到通知服务
@@ -521,7 +527,7 @@ class AliyunTrafficCheck
         }
 
         $account = $this->resolveAccountGroupForCreate($groupKey, $data['regionId'] ?? '');
-        $preview = $this->aliyunService->buildEcsCreatePreview($account, $data, $this->detectClientPublicIp());
+        $preview = $this->ecsProvisionService->buildEcsCreatePreview($account, $data, $this->detectClientPublicIp());
         $previewId = 'preview_' . bin2hex(random_bytes(12));
 
         $this->db->addLog('info', "ECS 创建预检完成 [{$preview['account']['label']}] {$preview['regionId']} {$preview['instanceType']}");
@@ -549,7 +555,7 @@ class AliyunTrafficCheck
         $account = $this->resolveAccountGroupForCreate($groupKey, $data['regionId'] ?? '');
         return [
             'success' => true,
-            'data' => $this->aliyunService->getAvailableSystemDiskOptions($account, $data)
+            'data' => $this->ecsProvisionService->getAvailableSystemDiskOptions($account, $data)
         ];
     }
 
@@ -584,7 +590,7 @@ class AliyunTrafficCheck
         };
 
         try {
-            $result = $this->aliyunService->createManagedEcsFromPreview($account, $preview, $progress);
+            $result = $this->ecsProvisionService->createManagedEcsFromPreview($account, $preview, $progress);
             $this->db->updateEcsCreateTask($taskId, [
                 'zone_id' => $preview['zoneId'] ?? '',
                 'image_id' => $preview['imageId'] ?? '',

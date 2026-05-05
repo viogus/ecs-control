@@ -7,19 +7,22 @@ class InstanceActionService
     private Database $db;
     private NotificationService $notificationService;
     private DdnsService $ddnsService;
+    private BssService $bssService;
 
     public function __construct(
         AliyunService $aliyunService,
         ConfigManager $configManager,
         Database $db,
         NotificationService $notificationService,
-        DdnsService $ddnsService
+        DdnsService $ddnsService,
+        BssService $bssService
     ) {
         $this->aliyunService = $aliyunService;
         $this->configManager = $configManager;
         $this->db = $db;
         $this->notificationService = $notificationService;
         $this->ddnsService = $ddnsService;
+        $this->bssService = $bssService;
     }
 
     // ---- public API ----
@@ -144,7 +147,7 @@ class InstanceActionService
             $balanceCache = $this->db->getBillingCache($targetAccount['id'], 'balance', '', 21600);
             if (!$balanceCache) {
                 try {
-                    $balance = $this->aliyunService->getAccountBalance($targetAccount['access_key_id'], $targetAccount['access_key_secret'], $targetAccount['site_type'] ?? 'china');
+                    $balance = $this->bssService->getAccountBalance($targetAccount['access_key_id'], $targetAccount['access_key_secret'], $targetAccount['site_type'] ?? 'china');
                     $this->db->setBillingCache($targetAccount['id'], 'balance', '', $balance);
                 } catch (\Exception $e) { $billingError = '余额查询失败: ' . strip_tags($e->getMessage()); }
             }
@@ -152,7 +155,7 @@ class InstanceActionService
                 $billCache = $this->db->getBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, 21600);
                 if (!$billCache) {
                     try {
-                        $bill = $this->aliyunService->getInstanceBill($targetAccount['access_key_id'], $targetAccount['access_key_secret'], $targetAccount['instance_id'], $billingCycle, $targetAccount['site_type'] ?? 'china');
+                        $bill = $this->bssService->getInstanceBill($targetAccount['access_key_id'], $targetAccount['access_key_secret'], $targetAccount['instance_id'], $billingCycle, $targetAccount['site_type'] ?? 'china');
                         $this->db->setBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, $bill);
                     } catch (\Exception $e) { $billingError = ($billingError ? $billingError . '; ' : '') . '账单查询失败: ' . strip_tags($e->getMessage()); }
                 }
