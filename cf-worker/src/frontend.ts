@@ -84,7 +84,7 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
       <button class="tab" :class="{active:tab==='instances'}" @click="tab='instances'">实例监控</button>
       <button class="tab" :class="{active:tab==='ddns'}" @click="tab='ddns'">DDNS</button>
       <button class="tab" :class="{active:tab==='logs'}" @click="tab='logs'">系统日志</button>
-      <button class="tab" :class="{active:tab==='schedules'}" @click="tab='schedules'">计划任务</button>
+      <button class="tab" :class="{active:tab==='accounts'}" @click="tab='accounts'">实例配置</button>
       <button class="tab" :class="{active:tab==='settings'}" @click="tab='settings'">系统设置</button>
     </div>
 
@@ -153,24 +153,37 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
       </div>
     </div>
 
-    <!-- Tab: Schedules -->
-    <div v-if="tab==='schedules'">
-      <div v-if="instances.length===0" class="card"><p style="color:#86868b">暂无实例数据</p></div>
-      <div v-for="inst in instances" :key="'sch-'+inst.id" class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <!-- Tab: Instance Config -->
+    <div v-if="tab==='accounts'">
+      <div v-if="instances.length===0" class="card"><p style="color:#86868b">暂无实例</p></div>
+      <div v-for="inst in instances" :key="'cfg-'+inst.id" class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
           <strong>{{ inst.remark || inst.instance_name || inst.instance_id }}</strong>
           <span v-if="inst.schedule_blocked_by_traffic" style="color:#ff3b30;font-size:12px">流量熔断暂停</span>
         </div>
+        <div class="row">
+          <div class="form-group"><label>AccessKey ID</label><input v-model="cfgForm[inst.id].access_key_id"></div>
+          <div class="form-group"><label>AccessKey Secret</label><input v-model="cfgForm[inst.id].access_key_secret" type="password" placeholder="留空不修改"></div>
+        </div>
+        <div class="row">
+          <div class="form-group"><label>区域</label><input v-model="cfgForm[inst.id].region_id"></div>
+          <div class="form-group"><label>实例 ID</label><input v-model="cfgForm[inst.id].instance_id"></div>
+        </div>
+        <div class="row">
+          <div class="form-group"><label>备注名</label><input v-model="cfgForm[inst.id].remark"></div>
+        </div>
+        <div class="separator"></div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <label class="toggle"><input type="checkbox" @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].enabled" true-value="1" false-value="0"><span class="slider"></span></label>
-          <span style="font-size:13px">启用定时</span>
+          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_enabled" true-value="1" false-value="0"><span class="slider"></span></label>
+          <span style="font-size:13px">定时开关机</span>
         </div>
-        <div v-if="sch[inst.id].enabled==='1'" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-          <span style="font-size:12px">开机</span><input @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].startTime" type="time" style="width:110px">
-          <span style="font-size:12px">关机</span><input @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].stopTime" type="time" style="width:110px">
-          <label class="toggle"><input type="checkbox" @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].startEnabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">启</span>
-          <label class="toggle"><input type="checkbox" @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].stopEnabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">停</span>
+        <div v-if="cfgForm[inst.id].schedule_enabled==='1'" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12px">开机</span><input v-model="cfgForm[inst.id].start_time" type="time" style="width:110px">
+          <span style="font-size:12px">关机</span><input v-model="cfgForm[inst.id].stop_time" type="time" style="width:110px">
+          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_start_enabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">启</span>
+          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_stop_enabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">停</span>
         </div>
+        <button class="btn btn-primary btn-sm" @click="saveAccount(inst.id)" :disabled="working" style="margin-top:10px">保存</button>
       </div>
     </div>
 
@@ -266,8 +279,8 @@ createApp({
     // DDNS
     ddns: { enabled: '0', domain: '', zoneId: '', token: '', proxied: '0' },
 
-    // schedules
-    sch: {},
+    // instance config forms
+    cfgForm: {},
   };},
 
   async mounted() {
@@ -342,30 +355,44 @@ createApp({
       try {
         const d = await this.api('/api/status');
         this.instances = (d.data || []).sort((a,b)=>(a.region_id+a.remark).localeCompare(b.region_id+b.remark));
-        for (const inst of this.instances) this.initSch(inst);
+        for (const inst of this.instances) this.initCfgForm(inst);
       } catch(e) { this.toastMsg('获取实例失败','error'); }
       finally { this.loading = false; }
     },
-    initSch(inst) {
-      if (!this.sch[inst.id]) {
-        this.sch[inst.id] = {
-          enabled: inst.schedule_enabled ? '1' : '0',
-          startEnabled: inst.schedule_start_enabled ? '1' : '0',
-          stopEnabled: inst.schedule_stop_enabled ? '1' : '0',
-          startTime: inst.start_time || '', stopTime: inst.stop_time || '',
+    initCfgForm(inst) {
+      if (!this.cfgForm[inst.id]) {
+        this.cfgForm[inst.id] = {
+          access_key_id: inst.access_key_id || '',
+          access_key_secret: inst.access_key_secret ? '********' : '',
+          region_id: inst.region_id || '',
+          instance_id: inst.instance_id || '',
+          remark: inst.remark || '',
+          schedule_enabled: inst.schedule_enabled ? '1' : '0',
+          schedule_start_enabled: inst.schedule_start_enabled ? '1' : '0',
+          schedule_stop_enabled: inst.schedule_stop_enabled ? '1' : '0',
+          start_time: inst.start_time || '',
+          stop_time: inst.stop_time || '',
         };
       }
     },
-    async saveInstSchedule(id) {
-      const s = this.sch[id]; if (!s) return;
-      await this.api('/api/schedule', {
-        accountId: id,
-        scheduleEnabled: s.enabled === '1',
-        scheduleStartEnabled: s.startEnabled === '1',
-        scheduleStopEnabled: s.stopEnabled === '1',
-        startTime: s.startTime, stopTime: s.stopTime,
-      });
-      this.toastMsg('已保存','success');
+    async saveAccount(id) {
+      const f = this.cfgForm[id]; if (!f) return;
+      this.working = true;
+      try {
+        const d = await this.api('/api/save-account', {
+          id, access_key_id: f.access_key_id, access_key_secret: f.access_key_secret,
+          instance_id: f.instance_id, region_id: f.region_id, remark: f.remark,
+          schedule_enabled: f.schedule_enabled === '1',
+          schedule_start_enabled: f.schedule_start_enabled === '1',
+          schedule_stop_enabled: f.schedule_stop_enabled === '1',
+          start_time: f.start_time, stop_time: f.stop_time,
+        });
+        if (d.success) {
+          this.toastMsg('已保存','success');
+          await this.fetchInstances();
+        } else this.toastMsg(d.message||'保存失败','error');
+      } catch(e) { this.toastMsg('保存失败','error'); }
+      finally { this.working = false; }
     },
     async doControl(id, action) {
       const d = await this.api('/api/control', { accountId: id, action, shutdownMode: this.cfg.shutdown_mode || 'KeepCharging' });

@@ -6,7 +6,7 @@ import { runScheduleCheck } from './schedules';
 import { syncDdns } from './ddns';
 import { doControl, doDelete } from './instance-actions';
 import { deleteInstance } from './aliyun-api';
-import { decrypt, isEncrypted } from './crypto';
+import { decrypt, encrypt, isEncrypted } from './crypto';
 import { buildPreview } from './ecs-create';
 import { importFromDocker } from './migration';
 import { renderHtml } from './frontend';
@@ -38,7 +38,7 @@ const WRITE_ACTIONS = new Set([
   'restore-schedule', 'control', 'delete', 'replace-ip',
   'preview-create', 'disk-options', 'create-ecs',
   'clear-logs', 'send-test-email', 'send-test-tg', 'send-test-wh',
-  'export', 'import', 'schedule',
+  'export', 'import', 'schedule', 'save-account',
 ]);
 
 export default {
@@ -299,6 +299,26 @@ export default {
         const { accountId, scheduleEnabled, scheduleStartEnabled, scheduleStopEnabled, startTime, stopTime } = body;
         await env.DB.prepare('UPDATE accounts SET schedule_enabled=?, schedule_start_enabled=?, schedule_stop_enabled=?, start_time=?, stop_time=? WHERE id=?')
           .bind(scheduleEnabled ? 1 : 0, scheduleStartEnabled ? 1 : 0, scheduleStopEnabled ? 1 : 0, String(startTime || ''), String(stopTime || ''), accountId).run();
+        return jsonResponse({ success: true });
+      }
+
+      // ── save-account: update instance config (AK, secret, instance_id, region, remark, schedule) ──
+      if (path === '/api/save-account' && req.method === 'POST') {
+        const { id, access_key_id, access_key_secret, instance_id, region_id, remark, schedule_enabled, schedule_start_enabled, schedule_stop_enabled, start_time, stop_time } = body;
+        if (!id) return jsonResponse({ success: false, message: '缺少账号 ID' });
+        let secret = String(access_key_secret || '');
+        if (secret && secret !== '********') {
+          secret = await encrypt(secret, env.ENCRYPTION_KEY);
+        } else {
+          secret = ''; // keep existing, don't overwrite
+        }
+        const setSql = secret
+          ? 'access_key_id=?, access_key_secret=?, instance_id=?, region_id=?, remark=?, schedule_enabled=?, schedule_start_enabled=?, schedule_stop_enabled=?, start_time=?, stop_time=?'
+          : 'access_key_id=?, instance_id=?, region_id=?, remark=?, schedule_enabled=?, schedule_start_enabled=?, schedule_stop_enabled=?, start_time=?, stop_time=?';
+        const params = secret
+          ? [String(access_key_id || ''), secret, String(instance_id || ''), String(region_id || ''), String(remark || ''), schedule_enabled ? 1 : 0, schedule_start_enabled ? 1 : 0, schedule_stop_enabled ? 1 : 0, String(start_time || ''), String(stop_time || ''), id]
+          : [String(access_key_id || ''), String(instance_id || ''), String(region_id || ''), String(remark || ''), schedule_enabled ? 1 : 0, schedule_start_enabled ? 1 : 0, schedule_stop_enabled ? 1 : 0, String(start_time || ''), String(stop_time || ''), id];
+        await env.DB.prepare(`UPDATE accounts SET ${setSql} WHERE id=?`).bind(...params).run();
         return jsonResponse({ success: true });
       }
 
