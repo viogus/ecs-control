@@ -361,8 +361,8 @@ createApp({
       finally { this.loading = false; }
     },
     initCfgForm(inst) {
-      if (this.cfgForm[inst.id]) return; // preserve unsaved edits
-      this.$set(this.cfgForm, inst.id, {
+      if (this.cfgForm[inst.id]) return;
+      this.cfgForm[inst.id] = {
         access_key_id: inst.access_key_id || '',
         access_key_secret: inst.access_key_secret ? '********' : '',
         region_id: inst.region_id || '',
@@ -373,7 +373,7 @@ createApp({
         schedule_stop_enabled: inst.schedule_stop_enabled ? '1' : '0',
         start_time: inst.start_time || '',
         stop_time: inst.stop_time || '',
-      });
+      };
     },
     async saveAccount(id) {
       const f = this.cfgForm[id]; if (!f) return;
@@ -521,7 +521,11 @@ createApp({
   },
 
   watch: {
-    tab(v) { if (v==='logs') this.fetchLogs(); if (v==='accounts'&&this.instances.length) this.instances.forEach(i=>this.initCfgForm(i)); },
+    tab(v) { if (v==='logs') this.fetchLogs(); },
+    instances: {
+      handler(arr) { arr.forEach(i=>this.initCfgForm(i)); },
+      deep: true, immediate: true,
+    },
     logTab() { this.fetchLogs(); },
   },
 }).mount('#app');
