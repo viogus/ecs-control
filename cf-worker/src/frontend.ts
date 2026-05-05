@@ -91,22 +91,22 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
       <div v-for="inst in instances" :key="inst.id" class="card" style="position:relative">
         <div style="display:flex;justify-content:space-between;align-items:start">
           <div>
-            <strong>{{ inst.remark || inst.instanceName || inst.instanceId }}</strong>
-            <span class="status-badge" :class="'status-'+inst.instanceStatus" style="margin-left:8px">{{ statusText(inst.instanceStatus) }}</span>
+            <strong>{{ inst.remark || inst.instance_name || inst.instance_id }}</strong>
+            <span class="status-badge" :class="'status-'+inst.instance_status" style="margin-left:8px">{{ statusText(inst.instance_status) }}</span>
           </div>
           <div style="display:flex;gap:6px">
-            <button v-if="inst.instanceStatus==='Running'" class="btn btn-outline btn-sm" @click="doControl(inst.id,'stop')">停机</button>
-            <button v-if="inst.instanceStatus==='Stopped'" class="btn btn-primary btn-sm" @click="doControl(inst.id,'start')">开机</button>
-            <button v-if="inst.instanceStatus==='Running'||inst.instanceStatus==='Stopped'" class="btn btn-danger btn-sm" @click="confirmDelete(inst)">释放</button>
+            <button v-if="inst.instance_status==='Running'" class="btn btn-outline btn-sm" @click="doControl(inst.id,'stop')">停机</button>
+            <button v-if="inst.instance_status==='Stopped'" class="btn btn-primary btn-sm" @click="doControl(inst.id,'start')">开机</button>
+            <button v-if="inst.instance_status==='Running'||inst.instance_status==='Stopped'" class="btn btn-danger btn-sm" @click="confirmDelete(inst)">释放</button>
           </div>
         </div>
         <div style="font-size:13px;color:#86868b;margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:4px">
-          <div>实例 ID: {{ inst.instanceId }}</div>
-          <div>规格: {{ inst.instanceType }} ({{ inst.cpu }}C{{ inst.memory }}G)</div>
-          <div>区域: {{ inst.regionId }}</div>
-          <div>公网 IP: {{ inst.publicIp || '-' }}</div>
+          <div>实例 ID: {{ inst.instance_id }}</div>
+          <div>规格: {{ inst.instance_type }} ({{ inst.cpu }}C{{ fmtMemory(inst.memory) }})</div>
+          <div>区域: {{ inst.region_id }}</div>
+          <div>公网 IP: {{ inst.public_ip || inst.eip_address || '-' }}</div>
           <div>出口流量: {{ fmtTraffic(inst.traffic_used) }} / {{ fmtTraffic(inst.max_traffic) }}</div>
-          <div>IP 模式: {{ inst.publicIpMode==='eip' ? 'EIP' : 'ECS 公网' }}</div>
+          <div>IP 模式: {{ inst.public_ip_mode==='eip' ? 'EIP' : 'ECS 公网' }}</div>
         </div>
       </div>
       <button class="btn btn-outline btn-sm" @click="fetchInstances" :disabled="loading" style="margin-top:8px">刷新</button>
@@ -295,7 +295,7 @@ createApp({
       this.loading = true;
       try {
         const d = await this.api('/api/status');
-        this.instances = (d.data || []).sort((a,b)=>(a.regionId+a.remark).localeCompare(b.regionId+b.remark));
+        this.instances = (d.data || []).sort((a,b)=>(a.region_id+a.remark).localeCompare(b.region_id+b.remark));
       } catch(e) { this.toastMsg('获取实例失败','error'); }
       finally { this.loading = false; }
     },
@@ -416,6 +416,7 @@ createApp({
       const m = {Running:'运行中',Stopped:'已停止',Starting:'启动中',Stopping:'停机中',Pending:'创建中',Releasing:'释放中',Released:'已释放',Unknown:'未知'};
       return m[s] || s || '未知';
     },
+    fmtMemory(mb) { return mb>=1024 ? parseFloat((mb/1024).toFixed(1))+'G' : mb+'M'; },
     fmtTraffic(gb) { return gb<1 ? Math.round(gb*1024)+' MB' : parseFloat(gb.toFixed(1))+' GB'; },
     fmtTime(ts) { return new Date(ts*1000).toLocaleString('zh-CN'); },
     toastMsg(msg, type) {
