@@ -99,7 +99,7 @@ jobs:
 
       - name: Generate and set worker secrets (first run only)
         run: |
-          existing=$(npx wrangler secret list --json 2>&1 | \
+          existing=$(npx wrangler secret list --json 2>/dev/null | \
             node -e "const s=require('fs').readFileSync(0,'utf8');try{const j=JSON.parse(s);const n=new Set(j.map(x=>x.name));if(n.has('ENCRYPTION_KEY')&&n.has('JWT_SECRET'))process.stdout.write('exists')}catch(e){}")
           if [ "$existing" = "exists" ]; then
             echo "Secrets already set on Cloudflare, skipping"
