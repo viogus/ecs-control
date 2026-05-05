@@ -248,6 +248,21 @@ createApp({
       const d = await r.json();
       this.initialized = d.initialized;
     } catch(e) { this.initMsg = '无法连接到服务器'; }
+
+    // Restore saved session
+    const saved = localStorage.getItem('ecs_token');
+    if (saved) {
+      this.token = saved;
+      this.csrfToken = localStorage.getItem('ecs_csrf') || '';
+      try {
+        const d = await this.api('/api/status');
+        if (d.data) {
+          this.loggedIn = true;
+          this.instances = (d.data||[]).sort((a,b)=>(a.region_id+a.remark).localeCompare(b.region_id+b.remark));
+          this.fetchConfig();
+        }
+      } catch(e) { this.doLogout(); }
+    }
   },
 
   methods: {
@@ -259,6 +274,8 @@ createApp({
         const d = await r.json();
         if (d.success) {
           this.token = d.token; this.csrfToken = d.csrf_token; this.loggedIn = true;
+          localStorage.setItem('ecs_token', d.token);
+          localStorage.setItem('ecs_csrf', d.csrf_token);
           await Promise.all([this.fetchInstances(), this.fetchConfig()]);
         } else this.loginMsg = d.message || '密码错误';
       } catch(e) { this.loginMsg = '登录请求失败'; }
@@ -274,12 +291,12 @@ createApp({
         }
         const r = await fetch('/api/setup', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         const d = await r.json();
-        if (d.success) { this.initialized = true; this.initMsg = ''; }
+        if (d.success) { this.initialized = true; this.initMsg = ''; this.token = d.token; this.csrfToken = d.csrf_token; this.loggedIn = true; localStorage.setItem('ecs_token', d.token); localStorage.setItem('ecs_csrf', d.csrf_token); await Promise.all([this.fetchInstances(), this.fetchConfig()]); }
         else this.initMsg = d.message || '初始化失败';
       } catch(e) { this.initMsg = '初始化请求失败'; }
       finally { this.working = false; }
     },
-    doLogout() { this.loggedIn = false; this.token = ''; this.instances = []; },
+    doLogout() { this.loggedIn = false; this.token = ''; this.instances = []; localStorage.clear(); },
 
     // ---- api helpers ----
     async api(path, body) {
