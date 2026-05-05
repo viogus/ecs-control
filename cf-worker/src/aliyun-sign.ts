@@ -9,11 +9,16 @@ export interface SignParams {
   params?: Record<string, string | number>;
 }
 
+// Mirrors PHP SDK percentEncode: urlencode → replace('+','%20') → replace('*','%2A') → preg_replace('%7E','~')
 function encode(v: string): string {
-  return encodeURIComponent(v)
-    .replace(/\!/g, '%21').replace(/\'/g, '%27').replace(/\(/g, '%28')
-    .replace(/\)/g, '%29').replace(/\*/g, '%2A').replace(/\+/g, '%20')
-    .replace(/\~/g, '%7E');
+  let r = encodeURIComponent(v);
+  // encodeURIComponent does not encode these; PHP urlencode does
+  r = r.replace(/\!/g, '%21').replace(/\'/g, '%27').replace(/\(/g, '%28').replace(/\)/g, '%29');
+  // encodeURIComponent does not encode *; PHP urlencode encodes as %2A
+  r = r.replace(/\*/g, '%2A');
+  // encodeURIComponent encodes space as %20 (same as PHP after +→%20 replacement) ✓
+  // PHP keeps ~ unencoded; encodeURIComponent also keeps ~ unencoded ✓
+  return r;
 }
 
 function timestamp(): string {
