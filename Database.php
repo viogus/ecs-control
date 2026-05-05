@@ -132,6 +132,8 @@ class Database
     public function reorderLogsIds(): bool
     {
         try {
+            // Entire operation is wrapped in a transaction; if the process
+            // crashes mid-way, SQLite WAL rolls back the DELETE automatically.
             $this->pdo->beginTransaction();
 
             // 1. 检查是否有数据

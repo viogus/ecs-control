@@ -185,12 +185,12 @@ class InstanceActionService
         $allInstances = [];
 
         foreach ($accounts as $account) {
-            $allInstances[] = $buildSnapshot($account, $threshold, $userInterval, false, true, $sync);
+            $allInstances[] = $buildSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'includeSensitive' => true, 'forceRefresh' => $sync]);
         }
 
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
-            $snap = $buildSnapshot($account, $threshold, $userInterval, false, true, $sync);
+            $snap = $buildSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'includeSensitive' => true, 'forceRefresh' => $sync]);
             $snap['instanceStatus'] = 'Releasing';
             $snap['status'] = 'Releasing';
             $snap['operationLocked'] = true;

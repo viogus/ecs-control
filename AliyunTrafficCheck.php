@@ -685,7 +685,7 @@ class AliyunTrafficCheck
                 continue;
             }
 
-            $this->responseBuilder->buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, true, true);
+            $this->responseBuilder->buildInstanceSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'billingEnabled' => $billingEnabled, 'includeSensitive' => true, 'forceRefresh' => true]);
             $instanceCount++;
         }
 

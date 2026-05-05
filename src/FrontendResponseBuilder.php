@@ -130,12 +130,12 @@ class FrontendResponseBuilder
         }));
 
         foreach ($accounts as $account) {
-            $data[] = $this->buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive);
+            $data[] = $this->buildInstanceSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'billingEnabled' => $billingEnabled, 'includeSensitive' => $includeSensitive]);
         }
 
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
-            $snap = $this->buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive);
+            $snap = $this->buildInstanceSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'billingEnabled' => $billingEnabled, 'includeSensitive' => $includeSensitive]);
             $snap['instanceStatus'] = 'Releasing';
             $snap['status'] = 'Releasing';
             $snap['operationLocked'] = true;
@@ -151,14 +151,14 @@ class FrontendResponseBuilder
         ];
     }
 
-    public function buildInstanceSnapshot(
-        $account,
-        int $threshold,
-        int $userInterval,
-        bool $billingEnabled,
-        bool $includeSensitive = true,
-        bool $forceRefresh = false
-    ): array {
+    public function buildInstanceSnapshot($account, array $options = []): array
+    {
+        $threshold = (int) ($options['threshold'] ?? 95);
+        $userInterval = (int) ($options['userInterval'] ?? 600);
+        $billingEnabled = (bool) ($options['billingEnabled'] ?? false);
+        $includeSensitive = array_key_exists('includeSensitive', $options) ? (bool) $options['includeSensitive'] : true;
+        $forceRefresh = (bool) ($options['forceRefresh'] ?? false);
+
         $currentTime = time();
         $lastUpdate = (int) ($account['updated_at'] ?? 0);
         $cachedStatus = $account['instance_status'] ?? 'Unknown';
