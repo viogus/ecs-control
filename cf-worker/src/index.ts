@@ -151,7 +151,7 @@ export default {
 
       if (path === '/api/logs' && req.method === 'POST') {
         const { tab } = body as any;
-        const types = tab === 'heartbeat' ? ['heartbeat'] : ['info', 'warning'];
+        const types = tab === 'heartbeat' ? ['heartbeat'] : ['info', 'warning', 'error'];
         const logs = await getLogs(env.DB, types, 20);
         return jsonResponse({ data: logs });
       }
