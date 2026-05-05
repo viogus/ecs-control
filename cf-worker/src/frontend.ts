@@ -82,9 +82,9 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
 
     <div class="tabs">
       <button class="tab" :class="{active:tab==='instances'}" @click="tab='instances'">实例监控</button>
+      <button class="tab" :class="{active:tab==='accounts'}" @click="tab='accounts'">实例配置</button>
       <button class="tab" :class="{active:tab==='ddns'}" @click="tab='ddns'">DDNS</button>
       <button class="tab" :class="{active:tab==='logs'}" @click="tab='logs'">系统日志</button>
-      <button class="tab" :class="{active:tab==='accounts'}" @click="tab='accounts'">实例配置</button>
       <button class="tab" :class="{active:tab==='settings'}" @click="tab='settings'">系统设置</button>
     </div>
 
@@ -114,6 +114,40 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
         </div>
       </div>
       <button class="btn btn-outline btn-sm" @click="fetchInstances" :disabled="loading" style="margin-top:8px">刷新</button>
+    </div>
+
+    <!-- Tab: Instance Config -->
+    <div v-if="tab==='accounts'">
+      <div v-if="instances.length===0" class="card"><p style="color:#86868b">暂无实例</p></div>
+      <div v-for="inst in instances" :key="'cfg-'+inst.id" class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <strong>{{ inst.remark || inst.instance_name || inst.instance_id }}</strong>
+          <span v-if="inst.schedule_blocked_by_traffic" style="color:#ff3b30;font-size:12px">流量熔断暂停</span>
+        </div>
+        <div class="row">
+          <div class="form-group"><label>AccessKey ID</label><input v-model="cfgForm[inst.id].access_key_id"></div>
+          <div class="form-group"><label>AccessKey Secret</label><input v-model="cfgForm[inst.id].access_key_secret" type="password" placeholder="留空不修改"></div>
+        </div>
+        <div class="row">
+          <div class="form-group"><label>区域</label><input v-model="cfgForm[inst.id].region_id"></div>
+          <div class="form-group"><label>实例 ID</label><input v-model="cfgForm[inst.id].instance_id"></div>
+        </div>
+        <div class="row">
+          <div class="form-group"><label>备注名</label><input v-model="cfgForm[inst.id].remark"></div>
+        </div>
+        <div class="separator"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_enabled" true-value="1" false-value="0"><span class="slider"></span></label>
+          <span style="font-size:13px">定时开关机</span>
+        </div>
+        <div v-if="cfgForm[inst.id].schedule_enabled==='1'" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12px">开机</span><input v-model="cfgForm[inst.id].start_time" type="time" style="width:110px">
+          <span style="font-size:12px">关机</span><input v-model="cfgForm[inst.id].stop_time" type="time" style="width:110px">
+          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_start_enabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">启</span>
+          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_stop_enabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">停</span>
+        </div>
+        <button class="btn btn-primary btn-sm" @click="saveAccount(inst.id)" :disabled="working" style="margin-top:10px">保存</button>
+      </div>
     </div>
 
     <!-- Tab: DDNS -->
@@ -150,40 +184,6 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
           <span style="margin-left:8px" :style="{color:log.type==='error'?'#ff3b30':log.type==='warning'?'#ff9500':'#1d1d1f'}">[{{ log.type }}]</span>
           <span style="margin-left:8px">{{ log.message }}</span>
         </div>
-      </div>
-    </div>
-
-    <!-- Tab: Instance Config -->
-    <div v-if="tab==='accounts'">
-      <div v-if="instances.length===0" class="card"><p style="color:#86868b">暂无实例</p></div>
-      <div v-for="inst in instances" :key="'cfg-'+inst.id" class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <strong>{{ inst.remark || inst.instance_name || inst.instance_id }}</strong>
-          <span v-if="inst.schedule_blocked_by_traffic" style="color:#ff3b30;font-size:12px">流量熔断暂停</span>
-        </div>
-        <div class="row">
-          <div class="form-group"><label>AccessKey ID</label><input v-model="cfgForm[inst.id].access_key_id"></div>
-          <div class="form-group"><label>AccessKey Secret</label><input v-model="cfgForm[inst.id].access_key_secret" type="password" placeholder="留空不修改"></div>
-        </div>
-        <div class="row">
-          <div class="form-group"><label>区域</label><input v-model="cfgForm[inst.id].region_id"></div>
-          <div class="form-group"><label>实例 ID</label><input v-model="cfgForm[inst.id].instance_id"></div>
-        </div>
-        <div class="row">
-          <div class="form-group"><label>备注名</label><input v-model="cfgForm[inst.id].remark"></div>
-        </div>
-        <div class="separator"></div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_enabled" true-value="1" false-value="0"><span class="slider"></span></label>
-          <span style="font-size:13px">定时开关机</span>
-        </div>
-        <div v-if="cfgForm[inst.id].schedule_enabled==='1'" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span style="font-size:12px">开机</span><input v-model="cfgForm[inst.id].start_time" type="time" style="width:110px">
-          <span style="font-size:12px">关机</span><input v-model="cfgForm[inst.id].stop_time" type="time" style="width:110px">
-          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_start_enabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">启</span>
-          <label class="toggle"><input type="checkbox" v-model="cfgForm[inst.id].schedule_stop_enabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">停</span>
-        </div>
-        <button class="btn btn-primary btn-sm" @click="saveAccount(inst.id)" :disabled="working" style="margin-top:10px">保存</button>
       </div>
     </div>
 
@@ -300,6 +300,7 @@ createApp({
         if (d.data) {
           this.loggedIn = true;
           this.instances = (d.data||[]).sort((a,b)=>(a.region_id+a.remark).localeCompare(b.region_id+b.remark));
+          for (const inst of this.instances) this.initCfgForm(inst);
           this.fetchConfig();
         }
       } catch(e) { this.doLogout(); }
@@ -360,20 +361,19 @@ createApp({
       finally { this.loading = false; }
     },
     initCfgForm(inst) {
-      if (!this.cfgForm[inst.id]) {
-        this.cfgForm[inst.id] = {
-          access_key_id: inst.access_key_id || '',
-          access_key_secret: inst.access_key_secret ? '********' : '',
-          region_id: inst.region_id || '',
-          instance_id: inst.instance_id || '',
-          remark: inst.remark || '',
-          schedule_enabled: inst.schedule_enabled ? '1' : '0',
-          schedule_start_enabled: inst.schedule_start_enabled ? '1' : '0',
-          schedule_stop_enabled: inst.schedule_stop_enabled ? '1' : '0',
-          start_time: inst.start_time || '',
-          stop_time: inst.stop_time || '',
-        };
-      }
+      if (this.cfgForm[inst.id]) return; // preserve unsaved edits
+      this.$set(this.cfgForm, inst.id, {
+        access_key_id: inst.access_key_id || '',
+        access_key_secret: inst.access_key_secret ? '********' : '',
+        region_id: inst.region_id || '',
+        instance_id: inst.instance_id || '',
+        remark: inst.remark || '',
+        schedule_enabled: inst.schedule_enabled ? '1' : '0',
+        schedule_start_enabled: inst.schedule_start_enabled ? '1' : '0',
+        schedule_stop_enabled: inst.schedule_stop_enabled ? '1' : '0',
+        start_time: inst.start_time || '',
+        stop_time: inst.stop_time || '',
+      });
     },
     async saveAccount(id) {
       const f = this.cfgForm[id]; if (!f) return;
@@ -521,7 +521,7 @@ createApp({
   },
 
   watch: {
-    tab(v) { if (v==='logs') this.fetchLogs(); },
+    tab(v) { if (v==='logs') this.fetchLogs(); if (v==='accounts'&&this.instances.length) this.instances.forEach(i=>this.initCfgForm(i)); },
     logTab() { this.fetchLogs(); },
   },
 }).mount('#app');
