@@ -38,7 +38,7 @@ const WRITE_ACTIONS = new Set([
   'restore-schedule', 'control', 'delete', 'replace-ip',
   'preview-create', 'disk-options', 'create-ecs',
   'clear-logs', 'send-test-email', 'send-test-tg', 'send-test-wh',
-  'export',
+  'export', 'import',
 ]);
 
 export default {
@@ -296,6 +296,18 @@ export default {
       // ── upload-logo ──
       if (path === '/api/upload-logo' && req.method === 'POST') {
         return jsonResponse({ success: false, message: 'CF Worker 版不支持 Logo 上传，请使用 Docker 版' });
+      }
+
+      // ── import: import data from Docker export JSON ──
+      if (path === '/api/import' && req.method === 'POST') {
+        const { migration } = body;
+        if (!migration) return jsonResponse({ success: false, message: '缺少迁移数据' });
+        try {
+          await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration);
+          return jsonResponse({ success: true, message: '数据导入成功' });
+        } catch (e: any) {
+          return jsonResponse({ success: false, message: '导入失败: ' + e.message });
+        }
       }
 
       return jsonResponse({ error: 'Not found' }, 404);

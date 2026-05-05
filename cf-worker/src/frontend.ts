@@ -197,8 +197,11 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
 
       <div class="card">
         <h2>数据管理</h2>
-        <button class="btn btn-outline btn-sm" @click="doExport" :disabled="working">导出 JSON（用于迁移至 Docker 版）</button>
-        <span v-if="exportResult" style="margin-left:8px;font-size:13px">{{ exportResult }}</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" @click="doExport" :disabled="working">导出 JSON</button>
+          <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">{{ importLabel }}<input type="file" accept=".json,application/json" @change="doImport" style="display:none" ref="importFile"></label>
+          <span v-if="exportResult" style="font-size:13px;color:#86868b">{{ exportResult }}</span>
+        </div>
       </div>
 
       <button class="btn btn-primary" @click="saveSettings" :disabled="working" style="margin-top:12px">{{ working ? '保存中...' : '保存设置' }}</button>
@@ -224,7 +227,7 @@ createApp({
     tab: 'instances', loading: false,
     instances: [],
     logs: [], logTab: 'action',
-    exportResult: '',
+    exportResult: '', importLabel: '导入 JSON',
 
     // config cache
     cfg: {
@@ -380,6 +383,19 @@ createApp({
         this.toastMsg(d.message || '已发送', d.success ? 'success' : 'error');
       } catch(e) { this.toastMsg('发送失败','error'); }
       finally { this.working = false; }
+    },
+    async doImport(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      this.importLabel = '导入中...';
+      try {
+        const text = await file.text();
+        const migration = JSON.parse(text);
+        const d = await this.api('/api/import', { migration });
+        if (d.success) { this.toastMsg(d.message || '导入成功', 'success'); await Promise.all([this.fetchInstances(), this.fetchConfig()]); }
+        else this.toastMsg(d.message || '导入失败', 'error');
+      } catch(ex) { this.toastMsg('文件读取或解析失败: ' + (ex.message||''), 'error'); }
+      finally { this.importLabel = '导入 JSON'; e.target.value = ''; }
     },
     async doExport() {
       this.working = true; this.exportResult = '';
