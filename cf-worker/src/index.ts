@@ -276,9 +276,13 @@ export default {
     }
 
     // Public endpoints
+    if (path === '/api/health' && req.method === 'GET') {
+      return jsonResponse({ ok: true });
+    }
+
     if (path === '/api/check-init' && req.method === 'POST') {
       const pwd = await getSetting(env.DB, 'admin_password', '');
-      return jsonResponse({ initialized: !!pwd, brand: { logo_url: '' } });
+      return jsonResponse({ initialized: !!pwd });
     }
 
     if (path === '/api/login' && req.method === 'POST') {
