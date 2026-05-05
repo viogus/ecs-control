@@ -76,10 +76,12 @@ export async function signAndCall(p: SignParams): Promise<Response> {
 
 export async function signedRequest(p: SignParams): Promise<Record<string, unknown>> {
   const res = await signAndCall(p);
-  const json = await res.json() as Record<string, unknown>;
+  const text = await res.text();
+  let json: Record<string, unknown> = {};
+  try { json = JSON.parse(text); } catch { /* CF error pages are HTML */ }
   if (!res.ok) {
-    const code = (json as any)?.Code ?? 'Unknown';
-    const msg = (json as any)?.Message ?? res.statusText;
+    const code = (json as any)?.Code ?? `HTTP ${res.status}`;
+    const msg = (json as any)?.Message ?? text.substring(0, 100);
     throw new Error(`Aliyun ${p.action} error [${code}]: ${msg}`);
   }
   return json;
