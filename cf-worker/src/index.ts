@@ -361,6 +361,7 @@ export default {
         const cutoff3 = Math.floor(Date.now() / 1000) - 3 * 86400;
         await env.DB.prepare('DELETE FROM logs WHERE created_at < ? AND type != ?').bind(cutoff30, 'heartbeat').run();
         await env.DB.prepare("DELETE FROM logs WHERE type = 'heartbeat' AND created_at < ?").bind(cutoff3).run();
+        await env.DB.prepare('DELETE FROM login_attempts WHERE attempt_time < ?').bind(cutoff30).run();
 
         // Process pending releases
         const pending = await env.DB.prepare('SELECT * FROM accounts WHERE is_deleted = 1').all();

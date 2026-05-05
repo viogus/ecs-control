@@ -135,8 +135,8 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
     <!-- Tab: Logs -->
     <div v-if="tab==='logs'">
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn btn-sm" :class="logTab==='action'?'btn-primary':'btn-outline'" @click="logTab='action';fetchLogs()">动作日志</button>
-        <button class="btn btn-sm" :class="logTab==='heartbeat'?'btn-primary':'btn-outline'" @click="logTab='heartbeat';fetchLogs()">心跳日志</button>
+        <button class="btn btn-sm" :class="logTab==='action'?'btn-primary':'btn-outline'" @click="logTab='action'">动作日志</button>
+        <button class="btn btn-sm" :class="logTab==='heartbeat'?'btn-primary':'btn-outline'" @click="logTab='heartbeat'">心跳日志</button>
         <button class="btn btn-danger btn-sm" @click="clearLogs" style="margin-left:auto">清空当前</button>
       </div>
       <div class="card" style="max-height:500px;overflow-y:auto">
@@ -306,7 +306,7 @@ createApp({
       setTimeout(() => this.fetchInstances(), 2000);
     },
     async confirmDelete(inst) {
-      if (!confirm(\`确认释放 \${inst.remark||inst.instanceId}？此操作不可恢复。\`)) return;
+      if (!confirm(\`确认释放 \${inst.remark||inst.instance_id}？此操作不可恢复。\`)) return;
       const d = await this.api('/api/delete', { accountId: inst.id });
       if (!d.success) { this.toastMsg(d.message || '操作失败', 'error'); return; }
       this.toastMsg('释放指令已提交','success');
