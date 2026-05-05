@@ -217,7 +217,7 @@ createApp({
     loggedIn: false, initialized: false,
     loginPassword: '', setupPassword: '', migrationJson: '',
     loginMsg: '', initMsg: '',
-    token: '', csrfToken: '${csrfToken}',
+    token: '', csrfToken: ${JSON.stringify(csrfToken)},
     working: false, toast: null,
 
     // admin
@@ -264,7 +264,7 @@ createApp({
     async doSetup() {
       this.working = true; this.initMsg = '';
       try {
-        const body: any = { password: this.setupPassword };
+        const body = { password: this.setupPassword };
         if (this.migrationJson.trim()) {
           try { body.migration = JSON.parse(this.migrationJson); }
           catch(e) { this.initMsg = 'JSON 格式错误'; this.working = false; return; }
@@ -279,8 +279,8 @@ createApp({
     doLogout() { this.loggedIn = false; this.token = ''; this.instances = []; },
 
     // ---- api helpers ----
-    async api(path: string, body?: any) {
-      const headers: any = {'Content-Type':'application/json'};
+    async api(path, body) {
+      const headers = {'Content-Type':'application/json'};
       if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
       if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
       const r = await fetch(path, {method:'POST',headers,body:body?JSON.stringify(body):undefined});
@@ -292,18 +292,20 @@ createApp({
       this.loading = true;
       try {
         const d = await this.api('/api/status');
-        this.instances = (d.data || []).sort((a:any,b:any)=>(a.regionId+a.remark).localeCompare(b.regionId+b.remark));
+        this.instances = (d.data || []).sort((a,b)=>(a.regionId+a.remark).localeCompare(b.regionId+b.remark));
       } catch(e) { this.toastMsg('获取实例失败','error'); }
       finally { this.loading = false; }
     },
-    async doControl(id: number, action: string) {
-      await this.api('/api/control', { accountId: id, action, shutdownMode: this.cfg.shutdown_mode || 'KeepCharging' });
+    async doControl(id, action) {
+      const d = await this.api('/api/control', { accountId: id, action, shutdownMode: this.cfg.shutdown_mode || 'KeepCharging' });
+      if (!d.success) { this.toastMsg(d.message || '操作失败', 'error'); return; }
       this.toastMsg(action==='start'?'开机指令已提交':'停机指令已提交', 'success');
       setTimeout(() => this.fetchInstances(), 2000);
     },
-    async confirmDelete(inst: any) {
+    async confirmDelete(inst) {
       if (!confirm(\`确认释放 \${inst.remark||inst.instanceId}？此操作不可恢复。\`)) return;
-      await this.api('/api/delete', { accountId: inst.id });
+      const d = await this.api('/api/delete', { accountId: inst.id });
+      if (!d.success) { this.toastMsg(d.message || '操作失败', 'error'); return; }
       this.toastMsg('释放指令已提交','success');
       setTimeout(() => this.fetchInstances(), 2000);
     },
@@ -313,7 +315,6 @@ createApp({
       try {
         const d = await this.api('/api/config');
         for (const k of Object.keys(this.cfg)) { if (d[k] !== undefined) this.cfg[k] = d[k]; }
-        // DDNS
         this.ddns.enabled = d.ddns_enabled || '0';
         this.ddns.domain = d.ddns_domain || '';
         this.ddns.zoneId = d.ddns_cf_zone_id || '';
@@ -324,9 +325,10 @@ createApp({
     async saveSettings() {
       this.working = true;
       try {
-        const body: any = { ...this.cfg };
+        const body = { ...this.cfg };
         if (body.notify_password === '********') delete body.notify_password;
-        await this.api('/api/save-config', body);
+        const d = await this.api('/api/save-config', body);
+        if (!d.success) { this.toastMsg(d.message || '保存失败', 'error'); return; }
         this.toastMsg('设置已保存','success');
       } catch(e) { this.toastMsg('保存失败','error'); }
       finally { this.working = false; }
@@ -334,15 +336,14 @@ createApp({
     async saveDdns() {
       this.working = true;
       try {
-        const body: any = {
-          ddns_enabled: this.ddns.enabled,
-          ddns_domain: this.ddns.domain,
-          ddns_cf_zone_id: this.ddns.zoneId,
-          ddns_cf_proxied: this.ddns.proxied,
+        const body = {
+          ddns_enabled: this.ddns.enabled, ddns_domain: this.ddns.domain,
+          ddns_cf_zone_id: this.ddns.zoneId, ddns_cf_proxied: this.ddns.proxied,
           ddns_provider: 'cloudflare',
         };
         if (this.ddns.token && this.ddns.token !== '********') body.ddns_cf_token = this.ddns.token;
-        await this.api('/api/save-config', body);
+        const d = await this.api('/api/save-config', body);
+        if (!d.success) { this.toastMsg(d.message || '保存失败', 'error'); return; }
         this.toastMsg('DDNS 配置已保存','success');
       } catch(e) { this.toastMsg('保存失败','error'); }
       finally { this.working = false; }
@@ -357,7 +358,8 @@ createApp({
     },
     async clearLogs() {
       if (!confirm('确认清空当前日志？')) return;
-      await this.api('/api/clear-logs', { tab: this.logTab });
+      const d = await this.api('/api/clear-logs', { tab: this.logTab });
+      if (!d.success) { this.toastMsg('清空失败', 'error'); return; }
       this.logs = [];
       this.toastMsg('日志已清空','success');
     },
@@ -365,14 +367,18 @@ createApp({
     // ---- actions ----
     async sendTestEmail() {
       this.working = true;
-      try { const d = await this.api('/api/send-test-email'); this.toastMsg(d.message,'success'); }
-      catch(e) { this.toastMsg('发送失败','error'); }
+      try {
+        const d = await this.api('/api/send-test-email');
+        this.toastMsg(d.message || '已发送', d.success ? 'success' : 'error');
+      } catch(e) { this.toastMsg('发送失败','error'); }
       finally { this.working = false; }
     },
     async sendTestWebhook() {
       this.working = true;
-      try { const d = await this.api('/api/send-test-wh'); this.toastMsg(d.message,'success'); }
-      catch(e) { this.toastMsg('发送失败','error'); }
+      try {
+        const d = await this.api('/api/send-test-wh');
+        this.toastMsg(d.message || '已发送', d.success ? 'success' : 'error');
+      } catch(e) { this.toastMsg('发送失败','error'); }
       finally { this.working = false; }
     },
     async doExport() {
@@ -390,13 +396,13 @@ createApp({
     },
 
     // ---- utils ----
-    statusText(s: string) {
-      const m: any = {Running:'运行中',Stopped:'已停止',Starting:'启动中',Stopping:'停机中',Pending:'创建中',Releasing:'释放中',Released:'已释放',Unknown:'未知'};
+    statusText(s) {
+      const m = {Running:'运行中',Stopped:'已停止',Starting:'启动中',Stopping:'停机中',Pending:'创建中',Releasing:'释放中',Released:'已释放',Unknown:'未知'};
       return m[s] || s || '未知';
     },
-    fmtTraffic(gb: number) { return gb<1 ? Math.round(gb*1024)+' MB' : parseFloat(gb.toFixed(1))+' GB'; },
-    fmtTime(ts: number) { return new Date(ts*1000).toLocaleString('zh-CN'); },
-    toastMsg(msg: string, type: string) {
+    fmtTraffic(gb) { return gb<1 ? Math.round(gb*1024)+' MB' : parseFloat(gb.toFixed(1))+' GB'; },
+    fmtTime(ts) { return new Date(ts*1000).toLocaleString('zh-CN'); },
+    toastMsg(msg, type) {
       this.toast = {msg,type};
       setTimeout(()=>{this.toast=null},3000);
     },
