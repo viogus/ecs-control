@@ -163,5 +163,13 @@ class Account implements \ArrayAccess
         $this->$prop = $value;
     }
 
-    public function offsetUnset(mixed $offset): void {}
+    public function offsetUnset(mixed $offset): void
+    {
+        $prop = self::FIELD_MAP[$offset] ?? null;
+        if ($prop !== null) {
+            $this->$prop = match ((new \ReflectionProperty(self::class, $prop))->getType()->getName()) {
+                'int' => 0, 'float' => 0.0, 'string' => '', 'bool' => false, default => null,
+            };
+        }
+    }
 }

@@ -77,8 +77,8 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
 
   // Clear schedule block when traffic is back within limits
   if (traffic.success && usagePercent < threshold && account.schedule_blocked_by_traffic) {
-    await env.DB.prepare('UPDATE accounts SET schedule_blocked_by_traffic = 0 WHERE group_key = ?')
-      .bind(account.group_key).run();
+    await env.DB.prepare('UPDATE accounts SET schedule_blocked_by_traffic = 0 WHERE id = ?')
+      .bind(account.id).run();
   }
 
   if ((overThreshold || overLimit) && thresholdAction === 'stop_and_notify' && !account.protection_suspended) {
@@ -88,8 +88,8 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
         await addLog(env.DB, 'warning', `Traffic circuit break: STOP [${label}] ${usagePercent.toFixed(1)}%`);
         logs.push(`[${label}] Circuit break: STOP`);
         await updateAccountStatus(env.DB, account.id, usedTraffic, 'Stopping', now);
-        await env.DB.prepare('UPDATE accounts SET schedule_blocked_by_traffic = 1 WHERE group_key = ?')
-          .bind(account.group_key).run();
+        await env.DB.prepare('UPDATE accounts SET schedule_blocked_by_traffic = 1 WHERE id = ?')
+          .bind(account.id).run();
       } catch (e: any) {
         await addLog(env.DB, 'error', `Circuit break STOP failed [${label}]: ${e.message}`);
       }

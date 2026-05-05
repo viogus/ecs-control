@@ -41,8 +41,10 @@ class InstanceActionService
                 $newStatus = $action === 'stop' ? 'Stopping' : 'Starting';
                 $this->configManager->updateAccountStatus($accountId, $targetAccount->trafficUsed, $newStatus, time());
                 $this->configManager->updateAutoStartBlocked($accountId, $action === 'stop');
+                if ($onStatusChanged) {
+                    $onStatusChanged($targetAccount, $targetAccount->instanceStatus, $newStatus, '用户手动操作。');
+                }
                 if ($action === 'start' && $waitForSync) {
-                    // Defer post-start sync to next cron cycle to avoid blocking PHP-FPM worker
                     $this->db->addLog('info', "实例启动成功，DDNS 和状态同步将在下一轮 cron 中自动完成 [{$label}]");
                 }
             }

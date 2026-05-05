@@ -86,6 +86,7 @@ export default {
       const existingPwd = await getSetting(env.DB, 'admin_password', '');
       if (existingPwd) return jsonResponse({ success: false, message: '已初始化' }, 403);
       if (!password || password.length < 8) return jsonResponse({ success: false, message: '密码至少需要8个字符' });
+      if (password.length > 72) return jsonResponse({ success: false, message: '密码最多72个字符' });
       const hashed = await hashPassword(password);
       await saveSetting(env.DB, 'admin_password', hashed);
       await saveSetting(env.DB, 'traffic_threshold', '95');
@@ -244,10 +245,10 @@ export default {
             host: settingsData['notify_host'] || '',
             port: settingsData['notify_port'] || '465',
             username: settingsData['notify_username'] || '',
-            password: settingsData['notify_password'] || '',
+            password: settingsData['notify_password'] ? '********' : '',
             secure: settingsData['notify_secure'] || 'ssl',
             tg_enabled: settingsData['notify_tg_enabled'] === '1',
-            tg_token: settingsData['notify_tg_token'] || '',
+            tg_token: settingsData['notify_tg_token'] ? '********' : '',
             tg_chat_id: settingsData['notify_tg_chat_id'] || '',
             wh_enabled: settingsData['notify_wh_enabled'] === '1',
             wh_url: settingsData['notify_wh_url'] || '',
