@@ -97,18 +97,23 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
-      - name: Generate and set worker secrets (first run only)
+      - name: Set worker secrets (first run only, skipped if exist)
         run: |
-          existing=$(npx wrangler secret list --json 2>/dev/null | \
-            node -e "const s=require('fs').readFileSync(0,'utf8');try{const j=JSON.parse(s);const n=new Set(j.map(x=>x.name));if(n.has('ENCRYPTION_KEY')&&n.has('JWT_SECRET'))process.stdout.write('exists')}catch(e){}")
-          if [ "$existing" = "exists" ]; then
-            echo "Secrets already set on Cloudflare, skipping"
+          # Use Cloudflare REST API to check if secrets exist (more reliable than wrangler CLI)
+          ACCOUNT=$(curl -sH "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts?per_page=1" | \
+            node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(s).result[0].id||'')}catch(e){}})")
+          SCRIPT=$(grep '^name =' wrangler.toml | sed 's/.*= *"\(.*\)"/\1/')
+          SECRETS=$(curl -sH "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts/$SCRIPT/secrets" | \
+            node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{try{const r=JSON.parse(s);const n=new Set((r.result||[]).map(x=>x.name));process.stdout.write(n.has('ENCRYPTION_KEY')&&n.has('JWT_SECRET')?'exists':'missing')}catch(e){process.stdout.write('missing')}})")
+          if [ "$SECRETS" = "exists" ]; then
+            echo "Secrets already set, skipping"
           else
+            echo "Generating new secrets..."
             key1=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
             key2=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
-            echo "Setting ENCRYPTION_KEY..."
             echo "$key1" | npx wrangler secret put ENCRYPTION_KEY
-            echo "Setting JWT_SECRET..."
             echo "$key2" | npx wrangler secret put JWT_SECRET
           fi
         env:
