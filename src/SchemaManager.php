@@ -33,6 +33,8 @@ class SchemaManager
         } catch (PDOException $e) {}
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, message TEXT, created_at INTEGER)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(type)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at)");
         $pdo->exec("CREATE TABLE IF NOT EXISTS login_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT, attempt_time INTEGER)");
         $pdo->exec("CREATE TABLE IF NOT EXISTS traffic_hourly (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER, traffic REAL, recorded_at INTEGER)");
         $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_hourly_unique ON traffic_hourly (account_id, recorded_at)");

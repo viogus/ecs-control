@@ -17,7 +17,7 @@ class NotificationService
      */
     public function notifySchedule($actionType, $account, $description = "")
     {
-        $maskedKey = substr($account['access_key_id'], 0, 7) . '***';
+        $maskedKey = substr($account['access_key_id'] ?? '', 0, 7) . '***';
         return $this->notify("定时任务: " . $actionType, "您的实例已执行{$actionType}操作", [
             ['label' => '账号', 'value' => $maskedKey],
             ['label' => '执行动作', 'value' => $actionType, 'highlight' => true],
@@ -319,6 +319,8 @@ class NotificationService
         curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($postFields));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
 
         if ($proxyType === 'socks5') {
             $proxyIp = $overrideConfig['proxy_ip'] ?? $this->config['notify_tg_proxy_ip'] ?? '';
@@ -356,6 +358,10 @@ class NotificationService
 
         if (empty($url))
             return "接口回调地址为空";
+
+        if (!$this->isExternalUrl($url)) {
+            return "接口回调地址指向内网地址，已拒绝请求";
+        }
 
         // Parse variables
         $traffic = '暂无';
@@ -459,6 +465,8 @@ class NotificationService
 
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
 
         $result = curl_exec($ch);
         $error = curl_error($ch);
@@ -467,9 +475,24 @@ class NotificationService
 
         if ($error)
             return "网络请求错误: " . $error;
-        if ($httpCode >= 400)
-            return "接口返回错误 {$httpCode}: " . $result;
+        if ($httpCode >= 400) {
+            $safeResult = strip_tags(substr((string) $result, 0, 200));
+            return "接口返回错误 {$httpCode}: " . $safeResult;
+        }
         return true;
+    }
+
+    private function isExternalUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if ($host === false || $host === null) {
+            return false;
+        }
+        $ip = gethostbyname($host);
+        if ($ip === $host) {
+            return false;
+        }
+        return !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
     }
 
     private function formatTraffic($trafficGb)

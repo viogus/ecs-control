@@ -39,14 +39,8 @@ class InstanceActionService
                 $this->configManager->updateAccountStatus($accountId, $targetAccount->trafficUsed, $newStatus, time());
                 $this->configManager->updateAutoStartBlocked($accountId, $action === 'stop');
                 if ($action === 'start' && $waitForSync) {
-                    sleep(8);
-                    $this->configManager->syncAccountGroups(true);
-                    $this->configManager->load();
-                    $syncedAccount = $this->configManager->getAccountById($accountId);
-                    if ($syncedAccount && $syncedAccount->instanceStatus === 'Running' && $onStatusChanged) {
-                        $onStatusChanged($syncedAccount, $targetAccount->instanceStatus, 'Running', '用户手动启动成功。');
-                    }
-                    $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), '实例启动后');
+                    // Defer post-start sync to next cron cycle to avoid blocking PHP-FPM worker
+                    $this->db->addLog('info', "实例启动成功，DDNS 和状态同步将在下一轮 cron 中自动完成 [{$label}]");
                 }
             }
             return $result;
@@ -152,7 +146,7 @@ class InstanceActionService
                 try {
                     $balance = $this->aliyunService->getAccountBalance($targetAccount['access_key_id'], $targetAccount['access_key_secret'], $targetAccount['site_type'] ?? 'china');
                     $this->db->setBillingCache($targetAccount['id'], 'balance', '', $balance);
-                } catch (\Exception $e) { $billingError = '余额查询失败: ' . $e->getMessage(); }
+                } catch (\Exception $e) { $billingError = '余额查询失败: ' . strip_tags($e->getMessage()); }
             }
             if (!empty($targetAccount['instance_id'])) {
                 $billCache = $this->db->getBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, 21600);
@@ -160,14 +154,15 @@ class InstanceActionService
                     try {
                         $bill = $this->aliyunService->getInstanceBill($targetAccount['access_key_id'], $targetAccount['access_key_secret'], $targetAccount['instance_id'], $billingCycle, $targetAccount['site_type'] ?? 'china');
                         $this->db->setBillingCache($targetAccount['id'], 'instance_bill', $billingCycle, $bill);
-                    } catch (\Exception $e) { $billingError = ($billingError ? $billingError . '; ' : '') . '账单查询失败: ' . $e->getMessage(); }
+                    } catch (\Exception $e) { $billingError = ($billingError ? $billingError . '; ' : '') . '账单查询失败: ' . strip_tags($e->getMessage()); }
                 }
             }
         }
 
         $response = ['success' => true, 'traffic_status' => $trafficResult['status'] ?? 'ok', 'traffic_message' => $trafficResult['message'] ?? ''];
         if ($billingError) {
-            $this->db->addLog('warning', "账单刷新异常 [{Helpers::getAccountLogLabel($targetAccount)}]: {$billingError}");
+            $billingLabel = Helpers::getAccountLogLabel($targetAccount);
+            $this->db->addLog('warning', "账单刷新异常 [{$billingLabel}]: {$billingError}");
             $response['billing_error'] = $billingError;
         }
         return $response;
@@ -248,7 +243,7 @@ class InstanceActionService
                     $this->aliyunService->controlInstance($account, 'stop');
                 }
             } catch (\Exception $e) {
-                $this->db->addLog('error', "后台异步释放行动异常，将于下一分钟轮询重试 [{$accountLabel}]: " . $e->getMessage());
+                $this->db->addLog('error', "后台异步释放行动异常，将于下一分钟轮询重试 [{$accountLabel}]: " . strip_tags($e->getMessage()));
             }
         }
     }

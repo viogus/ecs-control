@@ -87,7 +87,7 @@ class AccountSyncService
         return $metrics;
     }
 
-    public function syncAccountGroups(array &$accountsCache, ?array $groups = null, ?callable $onLog = null): void
+    public function syncAccountGroups(?array $groups = null, ?callable $onLog = null): void
     {
         $groups = $groups ?? $this->getAccountGroups();
 
@@ -108,6 +108,7 @@ class AccountSyncService
 
         $updateSql = "UPDATE accounts SET access_key_id=?,access_key_secret=?,region_id=?,instance_id=?,max_traffic=?,schedule_enabled=?,schedule_start_enabled=?,schedule_stop_enabled=?,start_time=?,stop_time=?,schedule_blocked_by_traffic=?,instance_status=?,remark=?,site_type=?,group_key=?,instance_name=?,instance_type=?,internet_max_bandwidth_out=?,public_ip=?,public_ip_mode=?,eip_allocation_id=?,eip_address=?,eip_managed=?,private_ip=?,cpu=?,memory=?,os_name=?,stopped_mode=? WHERE id=?";
         $updateStmt = $pdo->prepare($updateSql);
+        $deleteStmt = $pdo->prepare("DELETE FROM accounts WHERE id = ?");
 
         foreach ($groups as $group) {
             $configuredGroupKeys[] = $group['groupKey'];
@@ -165,7 +166,7 @@ class AccountSyncService
             if (!empty($existingByGroup[$group['groupKey']])) {
                 foreach ($existingByGroup[$group['groupKey']] as $row) {
                     if (!in_array($row['instance_id'], $remoteInstanceIds, true)) {
-                        $pdo->prepare("DELETE FROM accounts WHERE id = ?")->execute([$row['id']]);
+                        $deleteStmt->execute([$row['id']]);
                     }
                 }
             }
@@ -175,7 +176,7 @@ class AccountSyncService
             foreach ($existingRows as $row) {
                 $gk = $row['group_key'] ?: self::buildGroupKey($row['access_key_id'], $row['region_id']);
                 if (!in_array($gk, $configuredGroupKeys, true)) {
-                    $pdo->prepare("DELETE FROM accounts WHERE id = ?")->execute([$row['id']]);
+                    $deleteStmt->execute([$row['id']]);
                 }
             }
         }

@@ -129,6 +129,22 @@ class TelegramControlService
         $this->api->sendMessage($chatId, TelegramKeyboard::mainMenuText(), TelegramKeyboard::mainMenu());
     }
 
+    private const ACTION_MAP = [
+        'home' => 'handleActionHome',
+        'help' => 'handleActionHelp',
+        'traffic' => 'handleActionTraffic',
+        'list' => 'handleActionList',
+        'listrefresh' => 'handleActionListRefresh',
+        'inst' => 'handleActionInstanceDetail',
+        'refresh' => 'handleActionRefresh',
+        'refreshall' => 'handleActionRefreshAll',
+        'start' => 'handleActionStart',
+        'stop' => 'handleActionStop',
+        'release' => 'handleActionRelease',
+        'confirm' => 'handleActionConfirmRelease',
+        'cancel' => 'handleActionCancel',
+    ];
+
     private function handleCallback(array $callback)
     {
         $id = (string) ($callback['id'] ?? '');
@@ -152,76 +168,111 @@ class TelegramControlService
         }
 
         $action = $parts[1] ?? 'home';
-        if ($action === 'home') {
-            $this->api->answerCallback($id);
-            $this->api->editMessage($chatId, $messageId, TelegramKeyboard::mainMenuText(), TelegramKeyboard::mainMenu());
-        } elseif ($action === 'help') {
-            $this->api->answerCallback($id);
-            $this->api->editMessage($chatId, $messageId, TelegramKeyboard::helpText(), TelegramKeyboard::mainMenu());
-        } elseif ($action === 'traffic') {
-            $this->api->answerCallback($id, '正在刷新流量...');
-            $this->refreshAllData();
-            $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), TelegramKeyboard::traffic());
-            return;
-        } elseif ($action === 'list') {
-            $this->api->answerCallback($id);
-            $page = max(1, (int) ($parts[2] ?? 1));
-            $this->api->editMessage($chatId, $messageId, $this->buildInstancesText($page), $this->instancesKeyboard($page));
-        } elseif ($action === 'listrefresh') {
-            $this->api->answerCallback($id, '正在刷新列表...');
-            $page = max(1, (int) ($parts[2] ?? 1));
-            $this->refreshAllData();
-            $this->api->editMessage($chatId, $messageId, $this->buildInstancesText($page), $this->instancesKeyboard($page));
-            return;
-        } elseif ($action === 'inst') {
-            $this->api->answerCallback($id);
-            $accountId = (int) ($parts[2] ?? 0);
-            $this->api->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
-        } elseif ($action === 'refresh') {
-            $this->api->answerCallback($id, '正在刷新状态...');
-            $accountId = (int) ($parts[2] ?? 0);
-            if ($accountId > 0) {
-                $this->app->refreshAccount($accountId);
-            }
-            $this->api->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
-            return;
-        } elseif ($action === 'refreshall') {
-            $this->api->answerCallback($id, '正在同步数据...');
-            $this->refreshAllData();
-            $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), TelegramKeyboard::traffic());
-            return;
-        } elseif ($action === 'start') {
-            $this->api->answerCallback($id, '正在提交开机指令...');
-            $accountId = (int) ($parts[2] ?? 0);
-            $this->startInstance($chatId, $messageId, $accountId);
-            return;
-        } elseif ($action === 'stop') {
-            $this->api->answerCallback($id, '正在提交停机指令...');
-            $accountId = (int) ($parts[2] ?? 0);
-            $this->stopInstance($chatId, $messageId, $accountId);
-            return;
-        } elseif ($action === 'release') {
-            $this->api->answerCallback($id);
-            $accountId = (int) ($parts[2] ?? 0);
-            if (!$this->findInstance($accountId)) {
-                $this->api->editMessage($chatId, $messageId, "释放失败：实例不存在或已被清理。", TelegramKeyboard::mainMenu());
-                return;
-            }
-            $token = $this->createActionToken($userId, $chatId, 'release', $accountId);
-            $this->api->editMessage($chatId, $messageId, $this->buildReleaseConfirmText($accountId), $this->releaseConfirmKeyboard($token, $accountId));
-        } elseif ($action === 'confirm') {
-            $this->api->answerCallback($id, '正在提交释放指令...');
-            $token = (string) ($parts[2] ?? '');
-            $this->confirmRelease($chatId, $messageId, $userId, $token);
-            return;
-        } elseif ($action === 'cancel') {
-            $this->api->answerCallback($id);
-            $token = (string) ($parts[2] ?? '');
-            $this->useActionToken($token, $userId, $chatId, false);
-            $this->api->editMessage($chatId, $messageId, "已取消释放操作。", TelegramKeyboard::mainMenu());
+        $handler = self::ACTION_MAP[$action] ?? null;
+        if ($handler) {
+            $this->$handler($id, $chatId, $userId, $messageId, $parts);
         } else {
             $this->api->answerCallback($id);
         }
+    }
+
+    private function handleActionHome($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id);
+        $this->api->editMessage($chatId, $messageId, TelegramKeyboard::mainMenuText(), TelegramKeyboard::mainMenu());
+    }
+
+    private function handleActionHelp($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id);
+        $this->api->editMessage($chatId, $messageId, TelegramKeyboard::helpText(), TelegramKeyboard::mainMenu());
+    }
+
+    private function handleActionTraffic($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id, '正在刷新流量...');
+        $this->refreshAllData();
+        $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), TelegramKeyboard::traffic());
+    }
+
+    private function handleActionList($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id);
+        $page = max(1, (int) ($parts[2] ?? 1));
+        $this->api->editMessage($chatId, $messageId, $this->buildInstancesText($page), $this->instancesKeyboard($page));
+    }
+
+    private function handleActionListRefresh($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id, '正在刷新列表...');
+        $page = max(1, (int) ($parts[2] ?? 1));
+        $this->refreshAllData();
+        $this->api->editMessage($chatId, $messageId, $this->buildInstancesText($page), $this->instancesKeyboard($page));
+    }
+
+    private function handleActionInstanceDetail($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id);
+        $accountId = (int) ($parts[2] ?? 0);
+        $this->api->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
+    }
+
+    private function handleActionRefresh($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id, '正在刷新状态...');
+        $accountId = (int) ($parts[2] ?? 0);
+        if ($accountId > 0) {
+            $this->app->refreshAccount($accountId);
+        }
+        $this->api->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
+    }
+
+    private function handleActionRefreshAll($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id, '正在同步数据...');
+        $this->refreshAllData();
+        $this->api->editMessage($chatId, $messageId, $this->buildTrafficText(), TelegramKeyboard::traffic());
+    }
+
+    private function handleActionStart($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id, '正在提交开机指令...');
+        $accountId = (int) ($parts[2] ?? 0);
+        $this->startInstance($chatId, $messageId, $accountId);
+    }
+
+    private function handleActionStop($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id, '正在提交停机指令...');
+        $accountId = (int) ($parts[2] ?? 0);
+        $this->stopInstance($chatId, $messageId, $accountId);
+    }
+
+    private function handleActionRelease($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id);
+        $accountId = (int) ($parts[2] ?? 0);
+        if (!$this->findInstance($accountId)) {
+            $this->api->editMessage($chatId, $messageId, "释放失败：实例不存在或已被清理。", TelegramKeyboard::mainMenu());
+            return;
+        }
+        $token = $this->createActionToken($userId, $chatId, 'release', $accountId);
+        $this->api->editMessage($chatId, $messageId, $this->buildReleaseConfirmText($accountId), $this->releaseConfirmKeyboard($token, $accountId));
+    }
+
+    private function handleActionConfirmRelease($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id, '正在提交释放指令...');
+        $token = (string) ($parts[2] ?? '');
+        $this->confirmRelease($chatId, $messageId, $userId, $token);
+    }
+
+    private function handleActionCancel($id, $chatId, $userId, $messageId, array $parts): void
+    {
+        $this->api->answerCallback($id);
+        $token = (string) ($parts[2] ?? '');
+        $this->useActionToken($token, $userId, $chatId, false);
+        $this->api->editMessage($chatId, $messageId, "已取消释放操作。", TelegramKeyboard::mainMenu());
     }
 
     private function isAllowed($chatId, $userId)

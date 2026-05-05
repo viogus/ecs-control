@@ -152,6 +152,8 @@ class DdnsService
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Authorization: Bearer ' . $token,
             'Content-Type: application/json'
@@ -195,6 +197,8 @@ class DdnsService
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Authorization: Bearer ' . $token,
             'Content-Type: application/json'
@@ -278,12 +282,15 @@ class DdnsService
                 $recordName = $this->buildRecordNameForAccount($account, $groupCounts);
                 $result = $this->syncARecord($recordName, $publicIp);
                 if (!empty($result['success']) && empty($result['skipped'])) {
-                    $this->db->addLog('info', "DDNS 已同步 [{Helpers::getAccountLogLabel($account)}] {$recordName} -> {$publicIp} ({$source})");
+                    $ddnsLabel = Helpers::getAccountLogLabel($account);
+                    $this->db->addLog('info', "DDNS 已同步 [{$ddnsLabel}] {$recordName} -> {$publicIp} ({$source})");
                 } elseif (empty($result['success'])) {
-                    $this->db->addLog('warning', "DDNS 同步失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($result['message'] ?? '未知错误'));
+                    $ddnsErrLabel = Helpers::getAccountLogLabel($account);
+                    $this->db->addLog('warning', "DDNS 同步失败 [{$ddnsErrLabel}]: " . strip_tags($result['message'] ?? '未知错误'));
                 }
             } catch (\Exception $e) {
-                $this->db->addLog('warning', "DDNS 同步失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+                $ddnsExLabel = Helpers::getAccountLogLabel($account);
+                $this->db->addLog('warning', "DDNS 同步失败 [{$ddnsExLabel}]: " . strip_tags($e->getMessage()));
             }
         }
     }
@@ -307,7 +314,8 @@ class DdnsService
             $recordName = $this->buildRecordNameForAccount($account, $this->getGroupCounts($accountsBefore));
             $this->deleteRecordAndLog($recordName, $source);
         } catch (\Exception $e) {
-            $this->db->addLog('warning', "DDNS 清理失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+            $ddnsCleanLabel = Helpers::getAccountLogLabel($account);
+            $this->db->addLog('warning', "DDNS 清理失败 [{$ddnsCleanLabel}]: " . strip_tags($e->getMessage()));
         }
     }
 
@@ -371,7 +379,10 @@ class DdnsService
             if (empty($account['instance_id'])) continue;
             try { $records[$account['instance_id']] = $this->buildRecordNameForAccount($account, $groupCounts); }
             catch (\Exception $e) {
-                if ($this->db) $this->db->addLog('warning', "DDNS 记录名生成失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+                if ($this->db) {
+                    $recLabel = Helpers::getAccountLogLabel($account);
+                    $this->db->addLog('warning', "DDNS 记录名生成失败 [{$recLabel}]: " . strip_tags($e->getMessage()));
+                }
             }
         }
         return $records;

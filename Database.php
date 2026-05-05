@@ -40,13 +40,7 @@ class Database
             }
         }
 
-        // 3. 部署 .htaccess
-        $htaccess = $dir . '/.htaccess';
-        if (!file_exists($htaccess)) {
-            @file_put_contents($htaccess, "Order Deny,Allow\nDeny from all");
-        }
-
-        // 4. 部署 index.html
+        // 3. 部署 index.html (Nginx 环境下 .htaccess 无效，依赖 Nginx 配置拦截 /data/ 路径)
         $indexHtml = $dir . '/index.html';
         if (!file_exists($indexHtml)) {
             @file_put_contents($indexHtml, '');

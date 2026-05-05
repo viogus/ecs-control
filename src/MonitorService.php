@@ -1,5 +1,8 @@
 <?php
 
+use AlibabaCloud\Client\Exception\ClientException;
+use AlibabaCloud\Client\Exception\ServerException;
+
 class MonitorService
 {
     private $db;

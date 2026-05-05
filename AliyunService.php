@@ -10,22 +10,6 @@ class AliyunService
     private $managedTagKey = 'ecs-controller-managed';
     private $managedTagValue = 'true';
 
-    /**
-     * 智能重试执行器
-     * 自动处理网络抖动、超时和服务端临时错误
-     * * @param callable $func 业务逻辑闭包
-     * @param string $action 操作名称
-     * @param int $maxRetries 最大重试次数
-     * @return mixed
-     * @throws \Exception
-     */
-
-    /**
-     * 指数退避策略
-     * @param int $attempt 当前尝试次数
-     * @param bool $isThrottling 是否因为流控
-     */
-
     private $trafficCache = [];
 
     private function setDefaultClient($key, $secret, $regionId)
@@ -193,6 +177,8 @@ class AliyunService
                     $result['metric'] = $candidate['name'];
                     return $result;
                 }
+                // Fallback succeeded with 0 points -- clear stale exception
+                $lastException = null;
             } catch (\Exception $e) {
                 $lastException = $e;
             }
@@ -608,6 +594,7 @@ class AliyunService
                 if (!empty($targetRegionId)) {
                     throw $e;
                 }
+                error_log("Aliyun getInstances region {$region['regionId']} failed: " . $e->getMessage());
                 continue;
             }
         }
@@ -1457,7 +1444,7 @@ class AliyunService
             }
         }
 
-        throw new \Exception("EIP 状态等待超时: {$targetStatus}");
+        throw new \Exception("EIP 状态等待超时: {$targetStatus} (最后观测状态: " . ($last['Status'] ?? 'null') . ")");
     }
 
     public function releaseManagedEip($account)
@@ -1772,6 +1759,7 @@ class AliyunService
 
     private function estimateMaxBandwidthOut($instanceType, $regionId)
     {
+        // Estimated default; createManagedEcsFromPreview auto-downgrades if rejected
         return 200;
     }
 

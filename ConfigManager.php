@@ -253,7 +253,7 @@ class ConfigManager
         }
 
         $groups = $groups === null ? $this->getAccountGroups() : AccountSyncService::normalizeAccountGroups($groups, true);
-        $this->accountSync->syncAccountGroups($this->accountsCache, $groups, function($type, $msg) {
+        $this->accountSync->syncAccountGroups($groups, function($type, $msg) {
             $this->database->addLog($type, $msg);
         });
         $this->updateLastInstanceSyncTime(time());
@@ -358,25 +358,6 @@ class ConfigManager
         }
 
         return array_values($groups);
-    }
-    private function resolveNetworkMetadata($instance, $existingRow = null)
-    {
-        $eipAllocationId = trim((string) ($instance['eipAllocationId'] ?? ''));
-        $eipAddress = trim((string) ($instance['eipAddress'] ?? ''));
-        $existingMode = trim((string) ($existingRow['public_ip_mode'] ?? ''));
-        $existingManaged = (int) ($existingRow['eip_managed'] ?? 0);
-
-        $mode = $eipAllocationId !== '' ? 'eip' : 'ecs_public_ip';
-        if ($existingMode === 'eip' && $eipAllocationId !== '') {
-            $mode = 'eip';
-        }
-
-        return [
-            'public_ip_mode' => $mode,
-            'eip_allocation_id' => $eipAllocationId !== '' ? $eipAllocationId : trim((string) ($existingRow['eip_allocation_id'] ?? '')),
-            'eip_address' => $eipAddress !== '' ? $eipAddress : ($mode === 'eip' ? trim((string) ($instance['publicIp'] ?? '')) : ''),
-            'eip_managed' => $existingManaged
-        ];
     }
 
     public function updateAccountNetworkMetadata($id, array $metadata)

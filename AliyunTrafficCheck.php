@@ -622,7 +622,8 @@ class AliyunTrafficCheck
                 ]);
             }
             $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), "ECS 创建后");
-            $this->db->addLog('info', "一键创建 ECS成功 [{Helpers::getAccountLogLabel($account)}] {$result['instanceId']} {$preview['instanceType']} {$preview['regionId']} {$result['internetMaxBandwidthOut']}Mbps");
+            $createLabel = Helpers::getAccountLogLabel($account);
+            $this->db->addLog('info', "一键创建 ECS成功 [{$createLabel}] {$result['instanceId']} {$preview['instanceType']} {$preview['regionId']} {$result['internetMaxBandwidthOut']}Mbps");
             $notifyResult = $this->notificationService->notifyEcsCreated(Helpers::getAccountLogLabel($account), $result, $preview);
             Helpers::logNotificationResult($this->db, $notifyResult, Helpers::getAccountLogLabel($account));
 
@@ -637,7 +638,8 @@ class AliyunTrafficCheck
                 'step' => '创建失败',
                 'error_message' => strip_tags($e->getMessage())
             ]);
-            $this->db->addLog('error', "一键创建 ECS 失败 [{Helpers::getAccountLogLabel($account)}]: " . strip_tags($e->getMessage()));
+            $failLabel = Helpers::getAccountLogLabel($account);
+            $this->db->addLog('error', "一键创建 ECS 失败 [{$failLabel}]: " . strip_tags($e->getMessage()));
             throw $e;
         }
     }
@@ -672,8 +674,8 @@ class AliyunTrafficCheck
         $this->configManager->syncAccountGroups(true);
         $this->configManager->load();
 
-        $threshold = (int) ($this->configManager->get('traffic_threshold', 95) ?? 95);
-        $userInterval = (int) ($this->configManager->get('api_interval', 600) ?? 600);
+        $threshold = (int) ($this->configManager->get('traffic_threshold', 95) ?: 95);
+        $userInterval = (int) ($this->configManager->get('api_interval', 600) ?: 600);
         $billingEnabled = $this->configManager->get('enable_billing', '0') === '1';
         $instanceCount = 0;
 
@@ -812,8 +814,14 @@ class AliyunTrafficCheck
 
     private function detectClientPublicIp()
     {
+        // Only trust Cloudflare headers when behind Cloudflare (REMOTE_ADDR is a CF IP)
+        $fromCf = in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true);
+
         $candidates = [];
-        foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP', 'REMOTE_ADDR'] as $key) {
+        if ($fromCf && !empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            $candidates[] = trim((string) $_SERVER['HTTP_CF_CONNECTING_IP']);
+        }
+        foreach (['HTTP_X_REAL_IP', 'REMOTE_ADDR'] as $key) {
             if (!empty($_SERVER[$key])) {
                 $candidates[] = trim((string) $_SERVER[$key]);
             }
