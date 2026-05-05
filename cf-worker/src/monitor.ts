@@ -35,9 +35,12 @@ async function safeGetTraffic(account: Account, env: Env): Promise<TrafficResult
   }
 }
 
-async function safeGetStatus(account: Account): Promise<string> {
+async function safeGetStatus(account: Account, env: Env): Promise<string> {
   try { return await getInstanceStatus(account); }
-  catch { return 'Unknown'; }
+  catch (e: any) {
+    await addLog(env.DB, 'error', `Status query failed [${account.instance_id} / ${account.region_id}]: ${e.message}`);
+    return 'Unknown';
+  }
 }
 
 export async function runTrafficCheck(env: Env, account: Account): Promise<string[]> {
@@ -48,7 +51,7 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
   const label = account.remark || account.instance_id || account.instance_name;
 
   const traffic = await safeGetTraffic(account, env);
-  const status = await safeGetStatus(account);
+  const status = await safeGetStatus(account, env);
 
   const now = Math.floor(Date.now() / 1000);
   const metadata: Record<string, unknown> = {
