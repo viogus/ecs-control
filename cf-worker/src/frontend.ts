@@ -53,7 +53,10 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
 <div id="app">
 <div class="container">
   <!-- Login / Setup -->
-  <div v-if="!loggedIn">
+  <div v-if="restoring" class="card" style="text-align:center;padding:40px">
+    <span class="spinner"></span>加载中...
+  </div>
+  <div v-else-if="!loggedIn">
     <div class="card">
       <h1>ECS 服务器管家</h1>
       <div v-if="!initialized">
@@ -221,7 +224,7 @@ createApp({
     loginPassword: '', setupPassword: '', migrationJson: '',
     loginMsg: '', initMsg: '',
     token: '', csrfToken: ${JSON.stringify(csrfToken)},
-    working: false, toast: null,
+    working: false, toast: null, restoring: true,
 
     // admin
     tab: 'instances', loading: false,
@@ -263,6 +266,7 @@ createApp({
         }
       } catch(e) { this.doLogout(); }
     }
+    this.restoring = false;
   },
 
   methods: {
