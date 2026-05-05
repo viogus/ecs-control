@@ -38,7 +38,7 @@ const WRITE_ACTIONS = new Set([
   'restore-schedule', 'control', 'delete', 'replace-ip',
   'preview-create', 'disk-options', 'create-ecs',
   'clear-logs', 'send-test-email', 'send-test-tg', 'send-test-wh',
-  'export', 'import',
+  'export', 'import', 'schedule',
 ]);
 
 export default {
@@ -292,6 +292,14 @@ export default {
           account_groups: JSON.parse(groupJson),
         };
         return jsonResponse({ success: true, data: exportData });
+      }
+
+      // ── schedule: update per-instance schedule settings ──
+      if (path === '/api/schedule' && req.method === 'POST') {
+        const { accountId, scheduleEnabled, scheduleStartEnabled, scheduleStopEnabled, startTime, stopTime } = body;
+        await env.DB.prepare('UPDATE accounts SET schedule_enabled=?, schedule_start_enabled=?, schedule_stop_enabled=?, start_time=?, stop_time=? WHERE id=?')
+          .bind(scheduleEnabled ? 1 : 0, scheduleStartEnabled ? 1 : 0, scheduleStopEnabled ? 1 : 0, String(startTime || ''), String(stopTime || ''), accountId).run();
+        return jsonResponse({ success: true });
       }
 
       // ── upload-logo ──

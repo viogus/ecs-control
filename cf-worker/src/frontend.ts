@@ -84,6 +84,7 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
       <button class="tab" :class="{active:tab==='instances'}" @click="tab='instances'">实例监控</button>
       <button class="tab" :class="{active:tab==='ddns'}" @click="tab='ddns'">DDNS</button>
       <button class="tab" :class="{active:tab==='logs'}" @click="tab='logs'">系统日志</button>
+      <button class="tab" :class="{active:tab==='schedules'}" @click="tab='schedules'">计划任务</button>
       <button class="tab" :class="{active:tab==='settings'}" @click="tab='settings'">系统设置</button>
     </div>
 
@@ -148,6 +149,27 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
           <span style="color:#86868b">{{ fmtTime(log.created_at) }}</span>
           <span style="margin-left:8px" :style="{color:log.type==='error'?'#ff3b30':log.type==='warning'?'#ff9500':'#1d1d1f'}">[{{ log.type }}]</span>
           <span style="margin-left:8px">{{ log.message }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Schedules -->
+    <div v-if="tab==='schedules'">
+      <div v-if="instances.length===0" class="card"><p style="color:#86868b">暂无实例数据</p></div>
+      <div v-for="inst in instances" :key="'sch-'+inst.id" class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <strong>{{ inst.remark || inst.instance_name || inst.instance_id }}</strong>
+          <span v-if="inst.schedule_blocked_by_traffic" style="color:#ff3b30;font-size:12px">流量熔断暂停</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <label class="toggle"><input type="checkbox" @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].enabled" true-value="1" false-value="0"><span class="slider"></span></label>
+          <span style="font-size:13px">启用定时</span>
+        </div>
+        <div v-if="sch[inst.id].enabled==='1'" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span style="font-size:12px">开机</span><input @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].startTime" type="time" style="width:110px">
+          <span style="font-size:12px">关机</span><input @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].stopTime" type="time" style="width:110px">
+          <label class="toggle"><input type="checkbox" @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].startEnabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">启</span>
+          <label class="toggle"><input type="checkbox" @change="saveInstSchedule(inst.id)" v-model="sch[inst.id].stopEnabled" true-value="1" false-value="0"><span class="slider"></span></label><span style="font-size:11px">停</span>
         </div>
       </div>
     </div>
@@ -243,6 +265,9 @@ createApp({
 
     // DDNS
     ddns: { enabled: '0', domain: '', zoneId: '', token: '', proxied: '0' },
+
+    // schedules
+    sch: {},
   };},
 
   async mounted() {
@@ -317,8 +342,30 @@ createApp({
       try {
         const d = await this.api('/api/status');
         this.instances = (d.data || []).sort((a,b)=>(a.region_id+a.remark).localeCompare(b.region_id+b.remark));
+        for (const inst of this.instances) this.initSch(inst);
       } catch(e) { this.toastMsg('获取实例失败','error'); }
       finally { this.loading = false; }
+    },
+    initSch(inst) {
+      if (!this.sch[inst.id]) {
+        this.sch[inst.id] = {
+          enabled: inst.schedule_enabled ? '1' : '0',
+          startEnabled: inst.schedule_start_enabled ? '1' : '0',
+          stopEnabled: inst.schedule_stop_enabled ? '1' : '0',
+          startTime: inst.start_time || '', stopTime: inst.stop_time || '',
+        };
+      }
+    },
+    async saveInstSchedule(id) {
+      const s = this.sch[id]; if (!s) return;
+      await this.api('/api/schedule', {
+        accountId: id,
+        scheduleEnabled: s.enabled === '1',
+        scheduleStartEnabled: s.startEnabled === '1',
+        scheduleStopEnabled: s.stopEnabled === '1',
+        startTime: s.startTime, stopTime: s.stopTime,
+      });
+      this.toastMsg('已保存','success');
     },
     async doControl(id, action) {
       const d = await this.api('/api/control', { accountId: id, action, shutdownMode: this.cfg.shutdown_mode || 'KeepCharging' });
