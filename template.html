@@ -2921,7 +2921,7 @@
                             <p class="mt-1 text-sm leading-5 text-[var(--muted)]">将所有设置和账号数据导出为 JSON，用于迁移到 Cloudflare Worker 或其他实例。</p>
                             <div class="mt-3 flex flex-wrap gap-3">
                                 <button @click="exportJson" class="solid-button" :disabled="exporting">{{ exporting ? '导出中...' : '导出 JSON' }}</button>
-                                <a v-if="exportData" :href="exportDataUrl" :download="exportDataFilename" class="ghost-button" ref="exportLink">下载 JSON</a>
+                                <a v-if="exportData" :href="exportDataUrl" :download="exportDataFilename" class="ghost-button" @click="revokeExportBlob">下载 JSON</a>
                             </div>
                         </div>
 
@@ -5176,12 +5176,21 @@
                 };
 
                 const exportJson = async () => {
+                    const confirmed = await askConfirm(
+                        '导出文件包含 AccessKey 密钥、SMTP 密码、Telegram Token 等敏感凭证，请安全保存并妥善处理。',
+                        { title: '安全警告', confirmLabel: '确认导出', cancelLabel: '取消' }
+                    );
+                    if (!confirmed) return;
+
                     exporting.value = true;
+                    if (exportDataUrl.value) {
+                        URL.revokeObjectURL(exportDataUrl.value);
+                    }
                     exportData.value = null;
                     exportDataUrl.value = '';
                     exportDataFilename.value = '';
                     try {
-                        const res = await fetch('index.php?action=export');
+                        const res = await fetch('index.php?action=export', { headers: csrfHeaders() });
                         const data = await res.json();
                         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                         exportDataUrl.value = URL.createObjectURL(blob);
@@ -5193,6 +5202,17 @@
                         openAlert('导出失败：' + (error.message || '未知错误'), 'error');
                     } finally {
                         exporting.value = false;
+                    }
+                };
+
+                // 1s 延迟假设浏览器在此期间完成了 Blob URL 的下载管道消费（导出数据量很小，数 KB 级别）
+                const revokeExportBlob = () => {
+                    if (exportDataUrl.value) {
+                        setTimeout(() => {
+                            URL.revokeObjectURL(exportDataUrl.value);
+                            exportDataUrl.value = '';
+                            exportData.value = null;
+                        }, 1000);
                     }
                 };
 
@@ -5398,16 +5418,19 @@
                     ecsCreateResult.value = null;
                 });
 
+                const onVisibilityChange = () => {
+                    if (document.visibilityState === 'visible') {
+                        fetchStatusData(false);
+                    }
+                };
+
                 onMounted(() => {
                     checkInitStatus();
-                    document.addEventListener('visibilitychange', () => {
-                        if (document.visibilityState === 'visible') {
-                            fetchStatusData(false);
-                        }
-                    });
+                    document.addEventListener('visibilitychange', onVisibilityChange);
                 });
 
                 onUnmounted(() => {
+                    document.removeEventListener('visibilitychange', onVisibilityChange);
                     stopLogPolling();
                     stopStatusPolling();
                     stopManagePolling();
@@ -5535,6 +5558,7 @@
                     sendTestTelegram,
                     sendTestWebhook,
                     exportJson,
+                    revokeExportBlob,
                     fetchLogs,
                     clearLogs
                 };

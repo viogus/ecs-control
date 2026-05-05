@@ -217,7 +217,7 @@ class InstanceActionService
                 if (stripos($e->getMessage(), 'NotFound') !== false || stripos($e->getMessage(), 'InvalidInstanceId') !== false) {
                     $status = 'NotFound';
                 } else {
-                    $this->db->addLog('error', "后台异步释放引擎探测异常 [{$accountLabel}]: " . $e->getMessage());
+                    $this->db->addLog('error', "后台异步释放引擎探测异常 [{$accountLabel}]: " . strip_tags($e->getMessage()));
                     continue;
                 }
             }

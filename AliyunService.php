@@ -1242,6 +1242,7 @@ class AliyunService
                     'timeout' => 25.0
                 ])
                 ->request();
+        // RunInstances 是成本最高的操作，允许额外重试一次以应对瞬时 API 抖动
         }, 'runInstance', 2);
 
         return $result['InstanceIdSets']['InstanceIdSet'] ?? [];
