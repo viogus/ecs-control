@@ -5,7 +5,9 @@ export function renderHtml(csrfToken: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ECS 服务器管家</title>
-<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+<script>window.Vue||document.write('<script src="https://unpkg.zhimg.com/vue@3/dist/vue.global.prod.js"><\\/script>');</script>
+<noscript><div style="background:#ff3b30;color:#fff;padding:12px;text-align:center">请启用 JavaScript 以使用管理面板</div></noscript>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,system-ui,sans-serif;background:#f5f5f7;color:#1d1d1f}
