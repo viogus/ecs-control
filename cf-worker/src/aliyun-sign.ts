@@ -25,7 +25,7 @@ function timestamp(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-export async function signAndCall(p: SignParams): Promise<{ res: Response; sts: string }> {
+export async function signAndCall(p: SignParams): Promise<Response> {
   const nonce = crypto.randomUUID();
   const ts = timestamp();
 
@@ -64,26 +64,23 @@ export async function signAndCall(p: SignParams): Promise<{ res: Response; sts: 
     .map(([k, v]) => `${encode(k)}=${encode(v)}`)
     .join('&');
 
-  return {
-    res: await fetch(`https://${p.endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'AlibabaCloud (Mac OS X; x86_64) PHP/8.1 SDK/1.8',
-      },
-      body,
-    }),
-    sts: stringToSign,
-  };
+  return fetch(`https://${p.endpoint}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'AlibabaCloud (Mac OS X; x86_64) PHP/8.1 SDK/1.8',
+    },
+    body,
+  });
 }
 
 export async function signedRequest(p: SignParams): Promise<Record<string, unknown>> {
-  const { res, sts } = await signAndCall(p);
+  const res = await signAndCall(p);
   const json = await res.json() as Record<string, unknown>;
   if (!res.ok) {
     const code = (json as any)?.Code ?? 'Unknown';
     const msg = (json as any)?.Message ?? res.statusText;
-    throw new Error(`Aliyun ${p.action} error [${code}]: ${msg} ||| client STS: ${sts}`);
+    throw new Error(`Aliyun ${p.action} error [${code}]: ${msg}`);
   }
   return json;
 }

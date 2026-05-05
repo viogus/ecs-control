@@ -41,6 +41,9 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   // Store account groups
   await set('account_groups', JSON.stringify(data.account_groups));
 
+  // Clear existing accounts before re-import
+  await db.prepare('DELETE FROM accounts').run();
+
   // Import accounts (with re-encryption of secrets)
   for (const acc of data.accounts) {
     const secret = acc.access_key_secret && !isEncrypted(String(acc.access_key_secret))
