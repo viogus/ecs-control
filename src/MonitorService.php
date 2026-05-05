@@ -249,11 +249,9 @@ class MonitorService
         // 5. 保活逻辑
         $this->handleKeepAlive($account, $currentTime, $keepAlive, $s);
 
-        // 汇总日志
+        // 汇总日志 (traffic data from phase 2 to avoid duplicate DB query)
         $actionLog = empty($s['actions']) ? "无动作" : implode(", ", $s['actions']);
-        $maxTraffic = $account['max_traffic'];
-        $accountTraffic = $this->getGroupTrafficUsed($account);
-        $usagePercent = ($maxTraffic > 0) ? round(($accountTraffic / $maxTraffic) * 100, 2) : 0;
+        $usagePercent = $s['trafficUsagePercent'] ?? 0;
         $trafficDesc = "账号出口流量:{$usagePercent}%";
         $logLine = sprintf("%s %s | %s | %s | %s", $s['logPrefix'], $actionLog, $trafficDesc, $s['status'], $s['apiStatusLog']);
 
@@ -348,53 +346,57 @@ class MonitorService
         $isHardLimitExceeded = $maxTraffic > 0 && $accountTraffic >= $maxTraffic;
         $requiresTrafficProtection = $isOverThreshold || $isHardLimitExceeded;
 
+        // Save for log line in orchestrator (avoids duplicate DB query)
+        $s['trafficUsagePercent'] = $usagePercent;
+        $s['trafficAccountUsed'] = $accountTraffic;
+
         if (!$requiresTrafficProtection) {
             return false;
         }
 
-        if ($thresholdAction !== 'stop_and_notify') {
+        if ($thresholdAction === 'stop_and_notify') {
+            if ($s['protectionSuspended'] && $s['protectionSuspendReason'] === 'credential_invalid') {
+                if ($s['protectionSuspendNotifiedAt'] <= 0) {
+                    $s['actions'][] = "账号密钥失效，已暂停自动停机";
+                    $notifyResult = $this->notificationService->notifyCredentialInvalid($account['access_key_id'], $accountTraffic, $usagePercent, $threshold);
+                    Helpers::logNotificationResult($this->db, $notifyResult, $s['accountLabel']);
+                    $this->db->addLog('warning', "检测到账号鉴权失效，已暂停自动停机保护 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
+                    $s['protectionSuspendNotifiedAt'] = $currentTime;
+                    $this->configManager->updateAccountStatus($account['id'], $s['traffic'], $s['status'], $account['updated_at'] ?? 0, [
+                        'protection_suspended' => 1, 'protection_suspend_reason' => 'credential_invalid',
+                        'protection_suspend_notified_at' => $s['protectionSuspendNotifiedAt']
+                    ]);
+                } else {
+                    $s['apiStatusLog'] .= " [鉴权失效,已暂停自动停机]";
+                }
+            } else {
+                $canAttemptStop = !in_array($s['status'], ['Stopped', 'Stopping', 'Released'], true);
+                if ($canAttemptStop) {
+                    if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
+                        $previousStatus = $s['status'];
+                        $s['actions'][] = $isHardLimitExceeded ? "已超量自动停机" : "接近上限自动停机";
+                        $this->db->addLog('warning', "账号出口流量达到保护线，已自动停机 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
+                        $this->configManager->updateAccountStatus($account['id'], $s['traffic'], 'Stopping', $currentTime);
+                        $this->configManager->updateScheduleBlockedByTrafficForGroup($s['accountGroupKey'], true);
+                        $this->notifyStatusChangeIfNeeded($account, $previousStatus, 'Stopping', '流量达到保护线，已自动停机。');
+                        $s['status'] = 'Stopping';
+                        $s['scheduleBlockedByTraffic'] = true;
+                    } else {
+                        $s['actions'][] = "自动停机失败";
+                        $this->db->addLog('error', "账号出口流量达到保护线，但自动停机失败 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
+                    }
+                }
+            }
+
+            if (!empty($s['actions']) && !($s['protectionSuspended'] && $s['protectionSuspendReason'] === 'credential_invalid')) {
+                $mailRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $accountTraffic, $usagePercent, implode(',', $s['actions']), $threshold);
+                Helpers::logNotificationResult($this->db, $mailRes, $s['accountLabel']);
+            }
+        } else {
+            // notify_only mode — always dispatch notification
             $s['actions'][] = "超量提醒";
             $this->db->addLog('warning', "账号出口流量超限触发提醒 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
-            return true;
-        }
-
-        if ($s['protectionSuspended'] && $s['protectionSuspendReason'] === 'credential_invalid') {
-            if ($s['protectionSuspendNotifiedAt'] <= 0) {
-                $s['actions'][] = "账号密钥失效，已暂停自动停机";
-                $notifyResult = $this->notificationService->notifyCredentialInvalid($account['access_key_id'], $accountTraffic, $usagePercent, $threshold);
-                Helpers::logNotificationResult($this->db, $notifyResult, $s['accountLabel']);
-                $this->db->addLog('warning', "检测到账号鉴权失效，已暂停自动停机保护 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
-                $s['protectionSuspendNotifiedAt'] = $currentTime;
-                $this->configManager->updateAccountStatus($account['id'], $s['traffic'], $s['status'], $account['updated_at'] ?? 0, [
-                    'protection_suspended' => 1,
-                    'protection_suspend_reason' => 'credential_invalid',
-                    'protection_suspend_notified_at' => $s['protectionSuspendNotifiedAt']
-                ]);
-            } else {
-                $s['apiStatusLog'] .= " [鉴权失效,已暂停自动停机]";
-            }
-            return true;
-        }
-
-        $canAttemptStop = !in_array($s['status'], ['Stopped', 'Stopping', 'Released'], true);
-        if ($canAttemptStop) {
-            if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
-                $previousStatus = $s['status'];
-                $s['actions'][] = $isHardLimitExceeded ? "已超量自动停机" : "接近上限自动停机";
-                $this->db->addLog('warning', "账号出口流量达到保护线，已自动停机 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
-                $this->configManager->updateAccountStatus($account['id'], $s['traffic'], 'Stopping', $currentTime);
-                $this->configManager->updateScheduleBlockedByTrafficForGroup($s['accountGroupKey'], true);
-                $this->notifyStatusChangeIfNeeded($account, $previousStatus, 'Stopping', '流量达到保护线，已自动停机。');
-                $s['status'] = 'Stopping';
-                $s['scheduleBlockedByTraffic'] = true;
-            } else {
-                $s['actions'][] = "自动停机失败";
-                $this->db->addLog('error', "账号出口流量达到保护线，但自动停机失败 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
-            }
-        }
-
-        if (!empty($s['actions']) && !($s['protectionSuspended'] && $s['protectionSuspendReason'] === 'credential_invalid')) {
-            $mailRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $accountTraffic, $usagePercent, implode(',', $s['actions']), $threshold);
+            $mailRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $accountTraffic, $usagePercent, '超量提醒', $threshold);
             Helpers::logNotificationResult($this->db, $mailRes, $s['accountLabel']);
         }
 

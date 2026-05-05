@@ -18,7 +18,7 @@ class BssService
 
     public function getAccountBalance($key, $secret, $siteType = 'china')
     {
-        $cacheKey = md5($key);
+        $cacheKey = md5($key . '|' . $siteType);
         if (isset($this->balanceCache[$cacheKey])) return $this->balanceCache[$cacheKey];
 
         $bss = $this->getBssEndpoint($siteType);

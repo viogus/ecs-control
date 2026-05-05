@@ -187,6 +187,9 @@ class EcsProvisionService
                     if ($allocatedEip && !empty($allocatedEip['allocationId'])) {
                         $this->releaseEipAddressSilently($key, $secret, $regionId, $allocatedEip['allocationId']);
                     }
+                    if (!empty($instanceId)) {
+                        $this->deleteOrphanedInstance($key, $secret, $regionId, $instanceId);
+                    }
                     $lastError = $e;
                     $message = $e->getMessage();
                     if ($this->isDiskSizeError($message)) {
@@ -196,7 +199,7 @@ class EcsProvisionService
                 }
             }
         }
-        throw new \Exception($lastError ? $lastError->getMessage() : 'ECS 创建失败');
+        throw $lastError ?: new \Exception('ECS 创建失败');
     }
 
     // -- provisioning helpers --
@@ -634,5 +637,20 @@ class EcsProvisionService
     private function emitProgress($progress, $step): void
     {
         if (is_callable($progress)) $progress($step);
+    }
+
+    private function deleteOrphanedInstance($key, $secret, $regionId, $instanceId): void
+    {
+        try {
+            RetryHandler::execute(function () use ($key, $secret, $regionId, $instanceId) {
+                $this->setDefaultClient($key, $secret, $regionId);
+                return AlibabaCloud::rpc()->product('Ecs')->scheme('https')->version('2014-05-26')
+                    ->action('DeleteInstance')->method('POST')->host($this->ecsHost($regionId))
+                    ->options(['query' => ['RegionId' => $regionId, 'InstanceId' => $instanceId, 'Force' => true], 'connect_timeout' => 10.0, 'timeout' => 25.0])
+                    ->request();
+            }, 'deleteOrphanedInstance');
+        } catch (\Exception $e) {
+            error_log("Failed to clean up orphaned instance [{$instanceId}]: " . $e->getMessage());
+        }
     }
 }
