@@ -12,7 +12,8 @@ export interface SignParams {
 function encode(v: string): string {
   return encodeURIComponent(v)
     .replace(/\!/g, '%21').replace(/\'/g, '%27').replace(/\(/g, '%28')
-    .replace(/\)/g, '%29').replace(/\*/g, '%2A').replace(/\+/g, '%20');
+    .replace(/\)/g, '%29').replace(/\*/g, '%2A').replace(/\+/g, '%20')
+    .replace(/\~/g, '%7E');
 }
 
 function timestamp(): string {
@@ -54,9 +55,9 @@ export async function signAndCall(p: SignParams): Promise<Response> {
   const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
   query.Signature = sigB64;
 
-  const body = new URLSearchParams(
-    Object.fromEntries(Object.entries(query).map(([k, v]) => [k, v]))
-  ).toString();
+  const body = Object.entries(query)
+    .map(([k, v]) => `${encode(k)}=${encode(v)}`)
+    .join('&');
 
   return fetch(`https://${p.endpoint}`, {
     method: 'POST',
