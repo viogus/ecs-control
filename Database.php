@@ -69,7 +69,7 @@ class Database
         throw new Exception("权限不足：Web用户 ({$user}) 无法读写 {$dir}。<br>请修复权限：<code>chown -R {$user}:{$user} " . __DIR__ . "</code>");
     }
 
-    public function getPdo()
+    public function getPdo(): \PDO
     {
         return $this->pdo;
     }
@@ -80,14 +80,14 @@ class Database
         $stmt->execute([$type, $message, time()]);
     }
 
-    public function getLogs($limit = 100)
+    public function getLogs($limit = 100): array
     {
         $stmt = $this->pdo->prepare("SELECT * FROM logs ORDER BY id DESC LIMIT ?");
         $stmt->execute([$limit]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function getLogsByTypes(array $types, $limit = 20)
+    public function getLogsByTypes(array $types, $limit = 20): array
     {
         $placeholders = implode(',', array_fill(0, count($types), '?'));
         $sql = "SELECT * FROM logs WHERE type IN ($placeholders) ORDER BY id DESC LIMIT ?";
@@ -100,7 +100,7 @@ class Database
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function clearLogsByTypes(array $types)
+    public function clearLogsByTypes(array $types): bool
     {
         $placeholders = implode(',', array_fill(0, count($types), '?'));
         $stmt = $this->pdo->prepare("DELETE FROM logs WHERE type IN ($placeholders)");
@@ -129,7 +129,7 @@ class Database
      * 重置 Logs 表的自增 ID 并重新排序
      * 这是一个较重的操作，但能保证 ID 连续
      */
-    public function reorderLogsIds()
+    public function reorderLogsIds(): bool
     {
         try {
             $this->pdo->beginTransaction();
@@ -373,7 +373,7 @@ class Database
         return $stmt->execute($values);
     }
 
-    public function getEcsCreateTask($taskId)
+    public function getEcsCreateTask($taskId): ?array
     {
         $stmt = $this->pdo->prepare("SELECT * FROM ecs_create_tasks WHERE task_id = ? LIMIT 1");
         $stmt->execute([$taskId]);

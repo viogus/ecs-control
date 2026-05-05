@@ -48,7 +48,7 @@ class AliyunTrafficCheck
         }
     }
 
-    public function getInitError()
+    public function getInitError(): ?string
     {
         return $this->initError;
     }
@@ -63,7 +63,7 @@ class AliyunTrafficCheck
         return $this->configManager;
     }
 
-    public function isInitialized()
+    public function isInitialized(): bool
     {
         if ($this->initError)
             return false;
@@ -96,7 +96,7 @@ class AliyunTrafficCheck
         ];
     }
 
-    public function login($password)
+    public function login($password): bool
     {
         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
         // 仅当 REMOTE_ADDR 是内网地址（反向代理/Docker 网关）时才信任 X-Forwarded-For
@@ -188,7 +188,7 @@ class AliyunTrafficCheck
         throw new Exception('无法读取该账号的AK Secret，请重新输入后保存');
     }
 
-    public function setup($data)
+    public function setup($data): bool
     {
         if ($this->initError)
             throw new Exception($this->initError);
@@ -197,7 +197,7 @@ class AliyunTrafficCheck
         return $this->configManager->updateConfig($data);
     }
 
-    public function updateConfig($data)
+    public function updateConfig($data): bool
     {
         $success = $this->configManager->updateConfig($data);
         if ($success) {
@@ -206,7 +206,7 @@ class AliyunTrafficCheck
         return $success;
     }
 
-    public function uploadLogo(array $file)
+    public function uploadLogo(array $file): array
     {
         if ($this->initError) {
             return ['success' => false, 'message' => $this->initError];
@@ -259,13 +259,13 @@ class AliyunTrafficCheck
         return ['success' => true, 'url' => $url];
     }
 
-    public function getConfigForFrontend()
+    public function getConfigForFrontend(): array
     {
         if ($this->initError) return [];
         return $this->responseBuilder->getConfigForFrontend();
     }
     // --- 修改：支持按 Tab 获取日志 ---
-    public function getSystemLogs($tab = 'action')
+    public function getSystemLogs($tab = 'action'): array
     {
         if ($this->initError)
             return [];
@@ -325,7 +325,7 @@ class AliyunTrafficCheck
         return $result;
     }
 
-    public function getAccountHistory($id)
+    public function getAccountHistory($id): array
     {
         if ($this->initError)
             return [];
@@ -362,7 +362,7 @@ class AliyunTrafficCheck
 
     // --- 核心监控逻辑 ---
 
-    public function monitor()
+    public function monitor(): string
     {
         if ($this->initError) return "错误: " . $this->initError;
         $monitor = new MonitorService($this->db, $this->configManager, $this->aliyunService, $this->notificationService, $this->ddnsService);
@@ -390,14 +390,14 @@ class AliyunTrafficCheck
         }
     }
 
-    public function getStatusForFrontend($includeSensitive = false)
+    public function getStatusForFrontend($includeSensitive = false): array
     {
         if ($this->initError)
             return ['error' => $this->initError];
         return $this->responseBuilder->getStatusForFrontend($includeSensitive);
     }
 
-    public function refreshAccount($id)
+    public function refreshAccount($id): array|bool
     {
         if ($this->initError) return false;
         return $this->instanceActionService->refreshAccount($id);
@@ -509,7 +509,7 @@ class AliyunTrafficCheck
         }
     }
 
-    public function previewEcsCreate($data)
+    public function previewEcsCreate($data): array
     {
         if ($this->initError) {
             throw new Exception($this->initError);
@@ -553,7 +553,7 @@ class AliyunTrafficCheck
         ];
     }
 
-    public function createEcsFromPreview($previewId, array $preview)
+    public function createEcsFromPreview($previewId, array $preview): array
     {
         if ($this->initError) {
             throw new Exception($this->initError);
@@ -644,7 +644,7 @@ class AliyunTrafficCheck
         }
     }
 
-    public function syncAccountGroup($groupKey)
+    public function syncAccountGroup($groupKey): array
     {
         if ($this->initError) {
             throw new Exception($this->initError);
@@ -777,7 +777,7 @@ class AliyunTrafficCheck
         return '部分账号流量同步失败，请稍后重试';
     }
 
-    public function getEcsCreateTask($taskId)
+    public function getEcsCreateTask($taskId): ?array
     {
         if ($this->initError) {
             return null;
@@ -905,7 +905,7 @@ class AliyunTrafficCheck
         return $this->notificationService->sendTestWebhook($data);
     }
 
-    public function renderTemplate()
+    public function renderTemplate(): string
     {
         if (!file_exists('template.html'))
             return "File not found";
@@ -914,7 +914,7 @@ class AliyunTrafficCheck
         return ob_get_clean();
     }
 
-    public function exportForMigration()
+    public function exportForMigration(): array
     {
         $settings = $this->configManager->getAllSettings();
         $accounts = $this->configManager->getAccounts();

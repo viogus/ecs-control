@@ -134,22 +134,32 @@ class Account implements \ArrayAccess
         return $value;
     }
 
+    private static ?array $propertyTypes = null;
+
+    private static function initPropertyTypes(): void
+    {
+        if (self::$propertyTypes !== null) return;
+        self::$propertyTypes = [];
+        foreach (self::FIELD_MAP as $prop) {
+            $rp = new \ReflectionProperty(self::class, $prop);
+            $type = $rp->getType();
+            self::$propertyTypes[$prop] = $type instanceof \ReflectionNamedType ? $type->getName() : 'string';
+        }
+    }
+
     public function offsetSet(mixed $offset, mixed $value): void
     {
         $prop = self::FIELD_MAP[$offset] ?? null;
         if ($prop === null) return;
-        // Cast to correct type
-        $rp = new \ReflectionProperty(self::class, $prop);
-        $type = $rp->getType();
-        if ($type instanceof \ReflectionNamedType) {
-            $value = match ($type->getName()) {
-                'int' => (int) $value,
-                'float' => (float) $value,
-                'string' => (string) $value,
-                'bool' => (bool) $value,
-                default => $value,
-            };
-        }
+        self::initPropertyTypes();
+        $type = self::$propertyTypes[$prop] ?? 'string';
+        $value = match ($type) {
+            'int' => (int) $value,
+            'float' => (float) $value,
+            'string' => (string) $value,
+            'bool' => (bool) $value,
+            default => $value,
+        };
         $this->$prop = $value;
     }
 

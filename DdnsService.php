@@ -13,7 +13,7 @@ class DdnsService
         $this->configManager = $configManager;
     }
 
-    public function isEnabled()
+    public function isEnabled(): bool
     {
         return ($this->config['ddns_enabled'] ?? '0') === '1'
             && ($this->config['ddns_provider'] ?? 'cloudflare') === 'cloudflare'

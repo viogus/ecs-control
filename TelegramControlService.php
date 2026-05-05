@@ -114,7 +114,7 @@ class TelegramControlService
         }
 
         $text = trim((string) ($message['text'] ?? ''));
-        $command = strtolower(preg_replace('/@.+$/', '', strtok($text, " \n\t") ?: ''));
+        $command = strtolower(preg_replace('/@.+$/', '', preg_split('/\s+/', trim($text), 2)[0] ?? ''));
 
         if (in_array($command, ['/traffic', '流量'], true)) {
             $this->api->sendMessage($chatId, $this->buildTrafficText(), TelegramKeyboard::traffic());

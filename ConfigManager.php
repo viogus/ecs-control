@@ -89,22 +89,22 @@ class ConfigManager
         }
     }
 
-    public function get($key, $default = null)
+    public function get($key, $default = null): mixed
     {
         return $this->configCache[$key] ?? $default;
     }
 
-    public function getAllSettings()
+    public function getAllSettings(): array
     {
         return $this->configCache;
     }
 
-    public function getAccounts()
+    public function getAccounts(): array
     {
         return $this->accountsCache;
     }
 
-    public function getAccountById($id)
+    public function getAccountById($id): ?Account
     {
         foreach ($this->accountsCache as $acc) {
             if ($acc->id === (int) $id) {
@@ -114,7 +114,7 @@ class ConfigManager
         return null;
     }
 
-    public function getAccountByInstanceId($instanceId)
+    public function getAccountByInstanceId($instanceId): ?Account
     {
         foreach ($this->accountsCache as $acc) {
             if ($acc->instanceId === $instanceId) {
@@ -124,7 +124,7 @@ class ConfigManager
         return null;
     }
 
-    public function decryptAccountSecret($secretFromDb)
+    public function decryptAccountSecret($secretFromDb): string
     {
         if (empty($secretFromDb)) {
             return '';
@@ -132,7 +132,7 @@ class ConfigManager
         return $this->decryptValue($secretFromDb);
     }
 
-    public function getAccountGroups()
+    public function getAccountGroups(): array
     {
         $groups = $this->accountSync->getAccountGroups();
         if (!empty($groups)) {
@@ -153,7 +153,7 @@ class ConfigManager
     {
         return $this->accountSync->getAccountGroupMetrics($this->accountsCache);
     }
-    public function isInitialized()
+    public function isInitialized(): bool
     {
         return !empty($this->configCache['admin_password']);
     }
@@ -171,7 +171,7 @@ class ConfigManager
         $this->saveSetting('admin_password', $hashed);
     }
 
-    public function getMonitorKey()
+    public function getMonitorKey(): string
     {
         return $this->get('monitor_key', '');
     }
@@ -201,7 +201,7 @@ class ConfigManager
         return (int) ($this->configCache['last_instance_sync'] ?? 0);
     }
 
-    public function updateConfig($data)
+    public function updateConfig($data): bool
     {
         try {
             $this->db->beginTransaction();
@@ -399,7 +399,7 @@ class ConfigManager
         $this->load();
     }
 
-    public function getPendingReleaseAccounts()
+    public function getPendingReleaseAccounts(): array
     {
         $stmt = $this->db->query("SELECT * FROM accounts WHERE is_deleted = 1");
         $accounts = $stmt->fetchAll();
