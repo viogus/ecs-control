@@ -330,11 +330,14 @@ export default {
       if (!await requireCsrf(req, jwt)) return jsonResponse({ error: 'CSRF 验证失败' }, 403);
     }
 
-    // Route dispatch
+    // Route dispatch — all auth-gated APIs require POST
+    if (req.method !== 'POST') {
+      return jsonResponse({ error: 'Method not allowed' }, 405);
+    }
     const handler = API_ROUTES[routeKey];
     if (handler) {
       try {
-        const body: any = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+        const body: any = await req.json().catch(() => ({}));
         return await handler(env, body, jwt);
       } catch (e: any) {
         return jsonResponse({ success: false, message: e.message }, 400);

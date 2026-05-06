@@ -5191,7 +5191,12 @@
                     exportDataFilename.value = '';
                     try {
                         const res = await fetch('index.php?action=export', { headers: csrfHeaders() });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            throw new Error(err.error || err.message || `HTTP ${res.status}`);
+                        }
                         const data = await res.json();
+                        if (data.error) throw new Error(data.error);
                         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                         exportDataUrl.value = URL.createObjectURL(blob);
                         exportDataFilename.value = `ecs-control-export-${new Date().toISOString().substring(0, 10)}.json`;

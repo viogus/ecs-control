@@ -550,8 +550,10 @@ createApp({
         const d = await this.api('/api/export');
         if (d.success) {
           const blob = new Blob([JSON.stringify(d.data,null,2)],{type:'application/json'});
-          const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url;
           a.download = 'ecs-export-'+new Date().toISOString().slice(0,10)+'.json'; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 100);
           this.exportResult = '已下载';
         }
       } catch(e) { this.toastMsg('导出失败','error'); }

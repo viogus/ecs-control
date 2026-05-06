@@ -76,9 +76,10 @@ export async function signAndCall(p: SignParams): Promise<Response> {
 
 export async function signedRequest(p: SignParams): Promise<Record<string, unknown>> {
   const res = await signAndCall(p);
+  const text = await res.text();
   let json: Record<string, unknown>;
-  try { json = await res.json() as Record<string, unknown>; }
-  catch { json = { Code: `HTTP ${res.status}`, Message: await res.text().then(t => t.substring(0, 100)) } as any; }
+  try { json = JSON.parse(text); }
+  catch { json = { Code: `HTTP ${res.status}`, Message: text.substring(0, 100) } as any; }
   if (!res.ok) {
     const code = (json as any)?.Code ?? 'Unknown';
     const msg = (json as any)?.Message ?? res.statusText;
