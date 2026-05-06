@@ -75,15 +75,28 @@ export async function signAndCall(p: SignParams): Promise<Response> {
 }
 
 export async function signedRequest(p: SignParams): Promise<Record<string, unknown>> {
-  const res = await signAndCall(p);
-  const text = await res.text();
-  let json: Record<string, unknown>;
-  try { json = JSON.parse(text); }
-  catch { json = { Code: `HTTP ${res.status}`, Message: text.substring(0, 100) } as any; }
-  if (!res.ok) {
-    const code = (json as any)?.Code ?? 'Unknown';
-    const msg = (json as any)?.Message ?? res.statusText;
-    throw new Error(`Aliyun ${p.action} error [${code}]: ${msg}`);
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
+    try {
+      const res = await signAndCall(p);
+      const text = await res.text();
+      if (res.ok) {
+        try { return JSON.parse(text); }
+        catch { throw new Error(`Aliyun ${p.action}: invalid JSON response`); }
+      }
+      // 5xx = transient, retry; 4xx = permanent, throw
+      if (res.status >= 500) { lastErr = new Error(`Aliyun ${p.action}: HTTP ${res.status}`); continue; }
+      let json: Record<string, unknown> = {};
+      try { json = JSON.parse(text); } catch { /* non-JSON error body */ }
+      const code = (json as any)?.Code ?? 'Unknown';
+      const msg = (json as any)?.Message ?? text.substring(0, 100);
+      throw new Error(`Aliyun ${p.action} error [${code}]: ${msg}`);
+    } catch (e: any) {
+      if (e.message?.includes('Aliyun ')) throw e; // permanent error, don't retry
+      lastErr = e;
+      // network/fetch errors are transient, retry
+    }
   }
-  return json;
+  throw lastErr || new Error(`Aliyun ${p.action}: request failed`);
 }
