@@ -424,6 +424,7 @@ class MonitorService
                     $s['actions'][] = "定时停机";
                     $this->db->addLog('info', "执行定时停机 [{$s['accountLabel']}] {$stopTime}");
                     $this->configManager->updateAccountStatus($account['id'], $s['traffic'], 'Stopping', $currentTime);
+                    $this->configManager->updateAutoStartBlocked($account['id'], true);
                     $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
                     $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
                     Helpers::logNotificationResult($this->db, $scheduleNotify, $s['accountLabel']);
@@ -444,6 +445,7 @@ class MonitorService
                     $s['actions'][] = "定时开机";
                     $this->db->addLog('info', "执行定时开机 [{$s['accountLabel']}] {$startTime}");
                     $this->configManager->updateAccountStatus($account['id'], $s['traffic'], 'Starting', $currentTime);
+                    $this->configManager->updateAutoStartBlocked($account['id'], false);
                     $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
                     $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
                     Helpers::logNotificationResult($this->db, $scheduleNotify, $s['accountLabel']);

@@ -31,7 +31,7 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
       try {
         await controlInstance(account, 'stop', shutdownMode);
         await addLog(env.DB, 'info', `Scheduled STOP [${label}] ${account.stop_time}`);
-        await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_stop_date=? WHERE id=?')
+        await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
           .bind('Stopping', now.toISOString().substring(0, 10), account.id).run();
         logs.push(`[${label}] Scheduled STOP`);
       } catch (e: any) { await addLog(env.DB, 'error', `Scheduled STOP failed [${label}]: ${e.message}`); }
@@ -47,7 +47,7 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
       try {
         await controlInstance(account, 'start');
         await addLog(env.DB, 'info', `Scheduled START [${label}] ${account.start_time}`);
-        await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_start_date=? WHERE id=?')
+        await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_start_date=?, auto_start_blocked=0 WHERE id=?')
           .bind('Starting', now.toISOString().substring(0, 10), account.id).run();
         logs.push(`[${label}] Scheduled START`);
       } catch (e: any) { await addLog(env.DB, 'error', `Scheduled START failed [${label}]: ${e.message}`); }
