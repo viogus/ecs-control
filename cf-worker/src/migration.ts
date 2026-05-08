@@ -20,11 +20,13 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
     for (const r of rows.results) settingsSnapshot[r.key] = r.value;
   } catch { /* empty DB is fine */ }
 
-  // Phase 1: tag old accounts, insert new ones (all tagged with importId)
+  const writtenKeys = new Set<string>();
+
+  // Phase 1: tag old accounts (is_deleted=3), insert new ones hidden (is_deleted=4)
   await db.prepare("UPDATE accounts SET import_id = ?, is_deleted = 3 WHERE is_deleted = 0").bind(importId).run();
 
   try {
-    const insertSql = `INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,instance_status,remark,site_type,group_key,instance_name,instance_type,internet_max_bandwidth_out,public_ip,public_ip_mode,eip_allocation_id,eip_address,eip_managed,cpu,memory,os_name,schedule_enabled,schedule_start_enabled,schedule_stop_enabled,start_time,stop_time,schedule_blocked_by_traffic,traffic_billing_month,is_deleted,import_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`;
+    const insertSql = `INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,instance_status,remark,site_type,group_key,instance_name,instance_type,internet_max_bandwidth_out,public_ip,public_ip_mode,eip_allocation_id,eip_address,eip_managed,cpu,memory,os_name,schedule_enabled,schedule_start_enabled,schedule_stop_enabled,start_time,stop_time,schedule_blocked_by_traffic,traffic_billing_month,is_deleted,import_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,4,?)`;
     for (const acc of data.accounts) {
       const secret = acc.access_key_secret && !isEncrypted(String(acc.access_key_secret))
         ? await encrypt(String(acc.access_key_secret), encKey)
@@ -44,26 +46,31 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
       ).run();
     }
   } catch (e) {
-    await rollback(db, importId, settingsSnapshot);
+    await rollback(db, importId, settingsSnapshot, writtenKeys);
     throw e;
   }
 
-  // Phase 2: write all settings
+  // Phase 2: write all settings (accounts not yet visible)
   try {
-    await writeSettings(db, data, opts);
+    await writeSettings(db, data, opts, writtenKeys);
   } catch (e) {
-    await rollback(db, importId, settingsSnapshot);
+    await rollback(db, importId, settingsSnapshot, writtenKeys);
     throw e;
   }
 
-  // Phase 3: commit — delete old accounts, final cleanup
-  await db.prepare('DELETE FROM accounts WHERE import_id = ? AND is_deleted = 3').bind(importId).run();
-  await db.prepare("UPDATE accounts SET import_id = '' WHERE import_id = ?").bind(importId).run();
+  // Phase 3: atomic commit — delete old + promote new in a single flow
+  try {
+    await db.prepare('DELETE FROM accounts WHERE import_id = ? AND is_deleted = 3').bind(importId).run();
+    await db.prepare("UPDATE accounts SET is_deleted = 0, import_id = '' WHERE import_id = ?").bind(importId).run();
+  } catch (e) {
+    await rollback(db, importId, settingsSnapshot, writtenKeys);
+    throw e;
+  }
 }
 
-async function writeSettings(db: D1Database, data: MigrationExport, opts: ImportOptions): Promise<void> {
+async function writeSettings(db: D1Database, data: MigrationExport, opts: ImportOptions, writtenKeys: Set<string>): Promise<void> {
   const s = data.settings;
-  const set = (k: string, v: string) => saveSetting(db, k, v);
+  const set = (k: string, v: string) => { writtenKeys.add(k); return saveSetting(db, k, v); };
 
   if (!opts.skipPassword) await set('admin_password', String(s.admin_password ?? ''));
   if (!opts.skipDefaults) await set('traffic_threshold', String(s.traffic_threshold ?? 95));
@@ -99,14 +106,18 @@ async function writeSettings(db: D1Database, data: MigrationExport, opts: Import
   await set('account_groups', JSON.stringify(data.account_groups));
 }
 
-async function rollback(db: D1Database, importId: string, snapshot: Record<string, string> | null): Promise<void> {
-  // Restore settings from snapshot
+async function rollback(db: D1Database, importId: string, snapshot: Record<string, string> | null, writtenKeys: Set<string>): Promise<void> {
+  // Restore settings: write back snapshot values, delete keys that didn't exist before
   if (snapshot) {
-    for (const [k, v] of Object.entries(snapshot)) {
-      await saveSetting(db, k, v);
+    for (const k of writtenKeys) {
+      if (snapshot[k] !== undefined) {
+        await saveSetting(db, k, snapshot[k]);
+      } else {
+        await db.prepare('DELETE FROM settings WHERE key = ?').bind(k).run();
+      }
     }
   }
-  // Restore old accounts and remove new ones
+  // Restore old accounts and remove new staged ones
   await db.prepare("UPDATE accounts SET is_deleted = 0, import_id = '' WHERE import_id = ? AND is_deleted = 3").bind(importId).run();
   await db.prepare('DELETE FROM accounts WHERE import_id = ?').bind(importId).run();
 }
