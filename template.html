@@ -4300,7 +4300,7 @@
                     }
                     fetchingAllInstances.value = true;
                     try {
-                        const res = await fetch(`index.php?action=get_all_instances&sync=${sync ? '1' : '0'}`);
+                        const res = await fetch(`index.php?action=get_all_instances&sync=${sync ? '1' : '0'}`, { headers: csrfHeaders() });
                         const data = await res.json();
                         if (data.error) {
                             if (!options.silent) {
@@ -4337,7 +4337,7 @@
                 const syncCloudInstances = async () => {
                     syncingInstances.value = true;
                     try {
-                        const res = await fetch('index.php?action=get_all_instances&sync=1');
+                        const res = await fetch('index.php?action=get_all_instances&sync=1', { headers: csrfHeaders() });
                         const data = await res.json();
                         if (data.error) {
                             openAlert(data.error, 'error');

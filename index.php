@@ -158,7 +158,8 @@ $mutatingActions = [
     'send_test_webhook', 'refresh_account', 'fetch_instances', 'test_account',
     'sync_account_group', 'restore_schedule_block', 'preview_ecs_create',
     'get_ecs_disk_options', 'create_ecs', 'clear_logs',
-    'control_instance', 'delete_instance', 'replace_instance_ip', 'logout', 'export'
+    'control_instance', 'delete_instance', 'replace_instance_ip', 'logout', 'export',
+    'get_all_instances',
 ];
 if (in_array($action, $mutatingActions, true)) {
     require_csrf();

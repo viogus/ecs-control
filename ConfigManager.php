@@ -228,7 +228,19 @@ class ConfigManager
                 $this->saveNotificationSettings($data['Notification']);
             }
 
-            $groups = AccountSyncService::normalizeAccountGroups($data['Accounts'] ?? []);
+            // Merge masked secrets from existing groups before normalize
+            $existingGroups = $this->getAccountGroups();
+            $existingByKey = [];
+            foreach ($existingGroups as $g) { $existingByKey[$g['groupKey'] ?? ''] = $g; }
+            $accounts = $data['Accounts'] ?? [];
+            foreach ($accounts as &$acc) {
+                if (($acc['AccessKeySecret'] ?? '') === '********') {
+                    $gk = $acc['groupKey'] ?? AccountSyncService::buildGroupKey($acc['AccessKeyId'] ?? '', $acc['regionId'] ?? '');
+                    $acc['AccessKeySecret'] = $existingByKey[$gk]['AccessKeySecret'] ?? '********';
+                }
+            }
+            unset($acc);
+            $groups = AccountSyncService::normalizeAccountGroups($accounts);
             $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
             $this->syncAccountGroups(true, $groups);
 
