@@ -50,10 +50,17 @@ async function handleStatus(env: Env): Promise<Response> {
   return jsonResponse({ data: accs.filter(a => a.instance_id), system_last_run: 0, sync_interval: 600 });
 }
 
+const MASKED_SETTINGS = new Set([
+  'admin_password', 'notify_password', 'notify_tg_token', 'ddns_cf_token',
+  'notify_tg_proxy_pass', 'monitor_key',
+]);
+
 async function handleConfig(env: Env, _body: any, jwt: JwtPayload): Promise<Response> {
   const settings = await env.DB.prepare('SELECT key,value FROM settings').all<{key:string;value:string}>();
   const cfg: Record<string,string> = {};
-  for (const r of settings.results) cfg[r.key] = r.value;
+  for (const r of settings.results) {
+    cfg[r.key] = MASKED_SETTINGS.has(r.key) && r.value ? '********' : r.value;
+  }
   return jsonResponse({ ...cfg, csrf_token: jwt.csrf_token });
 }
 
@@ -181,7 +188,7 @@ async function handleExport(env: Env): Promise<Response> {
     },
     ddns: {
       enabled: settingsData['ddns_enabled'] === '1', domain: settingsData['ddns_domain'] || '',
-      cf_zone_id: settingsData['ddns_cf_zone_id'] || '', cf_token: settingsData['ddns_cf_token'] || '',
+      cf_zone_id: settingsData['ddns_cf_zone_id'] || '', cf_token: settingsData['ddns_cf_token'] ? '********' : '',
       cf_proxied: settingsData['ddns_cf_proxied'] === '1',
     },
     accounts: await Promise.all(rawAccounts.results.map(async a => {
