@@ -59,16 +59,17 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
     throw e;
   }
 
-  // Phase 3: promote new accounts (4→0), capture old IDs, delete old, clear markers
+  // Phase 3: promote new accounts (4→0), then delete old ones
   try {
     await db.prepare("UPDATE accounts SET is_deleted = 0 WHERE import_id = ? AND is_deleted = 4").bind(newImportId).run();
-    // Delete old accounts that were tagged in Phase 1 (no longer needed)
-    await db.prepare("DELETE FROM accounts WHERE import_id = ? AND is_deleted = 0").bind(importId).run();
-    await db.prepare("UPDATE accounts SET import_id = '' WHERE import_id = ?").bind(newImportId).run();
   } catch (e) {
     await rollback(db, importId, newImportId, settingsSnapshot, writtenKeys);
     throw e;
   }
+
+  // Old accounts deleted — from here forward, no rollback that would delete new accounts
+  await db.prepare("DELETE FROM accounts WHERE import_id = ? AND is_deleted = 0").bind(importId).run();
+  await db.prepare("UPDATE accounts SET import_id = '' WHERE import_id = ?").bind(newImportId).run();
 }
 
 async function writeSettings(db: D1Database, data: MigrationExport, opts: ImportOptions, writtenKeys: Set<string>): Promise<void> {
@@ -79,10 +80,10 @@ async function writeSettings(db: D1Database, data: MigrationExport, opts: Import
   if (!opts.skipDefaults) await set('traffic_threshold', String(s.traffic_threshold ?? 95));
   await set('shutdown_mode', String(s.shutdown_mode ?? 'KeepCharging'));
   await set('threshold_action', String(s.threshold_action ?? 'stop_and_notify'));
-  await set('keep_alive', s.keep_alive ? '1' : '0');
-  await set('monthly_auto_start', s.monthly_auto_start ? '1' : '0');
+  await set('keep_alive', (String(s.keep_alive) === '1' || s.keep_alive === true) ? '1' : '0');
+  await set('monthly_auto_start', (String(s.monthly_auto_start) === '1' || s.monthly_auto_start === true) ? '1' : '0');
   await set('api_interval', String(s.api_interval ?? 600));
-  await set('enable_billing', s.enable_billing ? '1' : '0');
+  await set('enable_billing', (String(s.enable_billing) === '1' || s.enable_billing === true) ? '1' : '0');
 
   const n = data.notification;
   await set('notify_email_enabled', n.email_enabled ? '1' : '0');

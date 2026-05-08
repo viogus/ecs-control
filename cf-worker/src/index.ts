@@ -157,10 +157,19 @@ async function handleExport(env: Env): Promise<Response> {
   const settingsRows = await env.DB.prepare('SELECT key,value FROM settings').all<{key:string;value:string}>();
   const settingsData: Record<string, string> = {};
   for (const r of settingsRows.results) settingsData[r.key] = r.value;
-  const rawAccounts = await env.DB.prepare('SELECT * FROM accounts').all<Record<string, unknown>>();
+  const rawAccounts = await env.DB.prepare('SELECT * FROM accounts WHERE is_deleted = 0').all<Record<string, unknown>>();
   const groupJson = settingsData['account_groups'] || '[]';
   return jsonResponse({ success: true, data: {
-    version: 1, exported_at: new Date().toISOString(), settings: settingsData,
+    settings: {
+      admin_password: '', traffic_threshold: settingsData['traffic_threshold'] || '95',
+      shutdown_mode: settingsData['shutdown_mode'] || 'KeepCharging',
+      threshold_action: settingsData['threshold_action'] || 'stop_and_notify',
+      keep_alive: settingsData['keep_alive'] === '1',
+      monthly_auto_start: settingsData['monthly_auto_start'] === '1',
+      api_interval: settingsData['api_interval'] || '600',
+      enable_billing: settingsData['enable_billing'] === '1',
+    },
+    version: 1, exported_at: new Date().toISOString(),
     notification: {
       email_enabled: settingsData['notify_email_enabled'] === '1', email: settingsData['notify_email'] || '',
       host: settingsData['notify_host'] || '', port: settingsData['notify_port'] || '465',
