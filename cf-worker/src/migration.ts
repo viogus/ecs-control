@@ -22,8 +22,8 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
 
   const writtenKeys = new Set<string>();
 
-  // Phase 1: tag old accounts (is_deleted=3), insert new ones hidden (is_deleted=4)
-  await db.prepare("UPDATE accounts SET import_id = ?, is_deleted = 3 WHERE is_deleted = 0").bind(importId).run();
+  // Phase 1: tag old accounts (keep visible), insert new ones hidden (is_deleted=4)
+  await db.prepare("UPDATE accounts SET import_id = ? WHERE is_deleted = 0").bind(importId).run();
 
   try {
     const insertSql = `INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,instance_status,remark,site_type,group_key,instance_name,instance_type,internet_max_bandwidth_out,public_ip,public_ip_mode,eip_allocation_id,eip_address,eip_managed,cpu,memory,os_name,schedule_enabled,schedule_start_enabled,schedule_stop_enabled,start_time,stop_time,schedule_blocked_by_traffic,traffic_billing_month,is_deleted,import_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,4,?)`;
@@ -58,10 +58,10 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
     throw e;
   }
 
-  // Phase 3: atomic commit — delete old + promote new in a single flow
+  // Phase 3: promote new accounts first, then clean up old ones
   try {
-    await db.prepare('DELETE FROM accounts WHERE import_id = ? AND is_deleted = 3').bind(importId).run();
-    await db.prepare("UPDATE accounts SET is_deleted = 0, import_id = '' WHERE import_id = ?").bind(importId).run();
+    await db.prepare("UPDATE accounts SET is_deleted = 0, import_id = '' WHERE import_id = ? AND is_deleted = 4").bind(importId).run();
+    await db.prepare("DELETE FROM accounts WHERE import_id = ? AND is_deleted = 0").bind(importId).run();
   } catch (e) {
     await rollback(db, importId, settingsSnapshot, writtenKeys);
     throw e;
@@ -117,7 +117,7 @@ async function rollback(db: D1Database, importId: string, snapshot: Record<strin
       }
     }
   }
-  // Restore old accounts and remove new staged ones
-  await db.prepare("UPDATE accounts SET is_deleted = 0, import_id = '' WHERE import_id = ? AND is_deleted = 3").bind(importId).run();
-  await db.prepare('DELETE FROM accounts WHERE import_id = ?').bind(importId).run();
+  // Restore old accounts (clear import_id) and remove new staged ones (is_deleted=4)
+  await db.prepare("UPDATE accounts SET import_id = '' WHERE import_id = ? AND is_deleted = 0").bind(importId).run();
+  await db.prepare('DELETE FROM accounts WHERE import_id = ? AND is_deleted = 4').bind(importId).run();
 }
