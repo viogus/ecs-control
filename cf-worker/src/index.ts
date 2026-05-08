@@ -59,7 +59,17 @@ async function handleConfig(env: Env, _body: any, jwt: JwtPayload): Promise<Resp
   const settings = await env.DB.prepare('SELECT key,value FROM settings').all<{key:string;value:string}>();
   const cfg: Record<string,string> = {};
   for (const r of settings.results) {
-    cfg[r.key] = MASKED_SETTINGS.has(r.key) && r.value ? '********' : r.value;
+    if (r.key === 'account_groups' && r.value) {
+      try {
+        const groups = JSON.parse(r.value);
+        for (const g of groups) { if (g.AccessKeySecret) g.AccessKeySecret = '********'; }
+        cfg[r.key] = JSON.stringify(groups);
+      } catch { cfg[r.key] = r.value; }
+    } else if (MASKED_SETTINGS.has(r.key) && r.value) {
+      cfg[r.key] = '********';
+    } else {
+      cfg[r.key] = r.value;
+    }
   }
   return jsonResponse({ ...cfg, csrf_token: jwt.csrf_token });
 }
