@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     traffic_api_message TEXT NOT NULL DEFAULT '',
     protection_suspended INTEGER NOT NULL DEFAULT 0,
     protection_suspend_reason TEXT NOT NULL DEFAULT '',
-    protection_suspend_notified_at INTEGER NOT NULL DEFAULT 0
+    protection_suspend_notified_at INTEGER NOT NULL DEFAULT 0,
+    import_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, message TEXT NOT NULL, created_at INTEGER NOT NULL);
