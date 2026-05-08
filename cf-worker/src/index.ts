@@ -180,15 +180,15 @@ async function handleExport(env: Env): Promise<Response> {
     notification: {
       email_enabled: settingsData['notify_email_enabled'] === '1', email: settingsData['notify_email'] || '',
       host: settingsData['notify_host'] || '', port: settingsData['notify_port'] || '465',
-      username: settingsData['notify_username'] || '', password: settingsData['notify_password'] ? '********' : '',
+      username: settingsData['notify_username'] || '', password: settingsData['notify_password'] || '',
       secure: settingsData['notify_secure'] || 'ssl', tg_enabled: settingsData['notify_tg_enabled'] === '1',
-      tg_token: settingsData['notify_tg_token'] ? '********' : '', tg_chat_id: settingsData['notify_tg_chat_id'] || '',
+      tg_token: settingsData['notify_tg_token'] || '', tg_chat_id: settingsData['notify_tg_chat_id'] || '',
       wh_enabled: settingsData['notify_wh_enabled'] === '1', wh_url: settingsData['notify_wh_url'] || '',
       wh_method: settingsData['notify_wh_method'] || 'GET',
     },
     ddns: {
       enabled: settingsData['ddns_enabled'] === '1', domain: settingsData['ddns_domain'] || '',
-      cf_zone_id: settingsData['ddns_cf_zone_id'] || '', cf_token: settingsData['ddns_cf_token'] ? '********' : '',
+      cf_zone_id: settingsData['ddns_cf_zone_id'] || '', cf_token: settingsData['ddns_cf_token'] || '',
       cf_proxied: settingsData['ddns_cf_proxied'] === '1',
     },
     accounts: await Promise.all(rawAccounts.results.map(async a => {
