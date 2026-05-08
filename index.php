@@ -402,7 +402,8 @@ if ($action === 'logout') {
 
 if ($action === 'get_all_instances') {
     header('Content-Type: application/json; charset=utf-8');
-    $sync = ($_GET['sync'] ?? '0') === '1';
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $sync = ($input['sync'] ?? false) === true;
     echo json_encode(['data' => $app->getAllManagedInstances($sync)]);
     exit;
 }
