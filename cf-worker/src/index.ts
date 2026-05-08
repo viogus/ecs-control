@@ -245,7 +245,7 @@ async function handleImport(env: Env, body: any): Promise<Response> {
   const { migration } = body;
   if (!migration) return jsonResponse({ success: false, message: '缺少迁移数据' });
   try {
-    await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration);
+    await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration, { skipPassword: true, skipDefaults: true });
     return jsonResponse({ success: true, message: '数据导入成功' });
   } catch (e: any) {
     return jsonResponse({ success: false, message: '导入失败: ' + e.message });
@@ -315,13 +315,13 @@ export default {
       if (password.length > 72) return jsonResponse({ success: false, message: '密码最多72个字符' });
       // Import first — if it fails, the instance stays uninitialized so the user can retry
       if (migration) {
-        try { await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration); }
+        try { await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration, { skipPassword: true }); }
         catch (e: any) { return jsonResponse({ success: false, message: `迁移数据导入失败: ${e.message}` }, 400); }
       }
-      // Save user's chosen password AFTER import (overrides any password from migration)
+      // Save user's chosen password AFTER import
       const hashed = await hashPassword(password);
       await saveSetting(env.DB, 'admin_password', hashed);
-      await saveSetting(env.DB, 'traffic_threshold', '95');
+      if (!migration) await saveSetting(env.DB, 'traffic_threshold', '95');
       const csrf = generateCsrfToken();
       const token = await signJwt({ role: 'admin', csrf_token: csrf }, env.JWT_SECRET);
       return jsonResponse({ success: true, token, csrf_token: csrf });

@@ -2,13 +2,15 @@ import type { MigrationExport } from './types';
 import { encrypt, isEncrypted } from './crypto';
 import { saveSetting } from './db';
 
-export async function importFromDocker(db: D1Database, encKey: string, data: MigrationExport): Promise<void> {
+export interface ImportOptions { skipPassword?: boolean; skipDefaults?: boolean; }
+
+export async function importFromDocker(db: D1Database, encKey: string, data: MigrationExport, opts: ImportOptions = {}): Promise<void> {
   if (data.version !== 1) throw new Error(`Unsupported export version: ${data.version}`);
 
   const s = data.settings;
   const set = (k: string, v: string) => saveSetting(db, k, v);
-  await set('admin_password', String(s.admin_password ?? ''));
-  await set('traffic_threshold', String(s.traffic_threshold ?? 95));
+  if (!opts.skipPassword) await set('admin_password', String(s.admin_password ?? ''));
+  if (!opts.skipDefaults) await set('traffic_threshold', String(s.traffic_threshold ?? 95));
   await set('shutdown_mode', String(s.shutdown_mode ?? 'KeepCharging'));
   await set('threshold_action', String(s.threshold_action ?? 'stop_and_notify'));
   await set('keep_alive', s.keep_alive ? '1' : '0');
@@ -41,10 +43,10 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   // Store account groups
   await set('account_groups', JSON.stringify(data.account_groups));
 
-  // Clear existing accounts before re-import
-  await db.prepare('DELETE FROM accounts').run();
+  // Import accounts first, then delete old ones — prevents data loss if insert fails
+  // Mark existing accounts for cleanup
+  await db.prepare("UPDATE accounts SET is_deleted = 3 WHERE is_deleted = 0").run();
 
-  // Import accounts (with re-encryption of secrets)
   for (const acc of data.accounts) {
     const secret = acc.access_key_secret && !isEncrypted(String(acc.access_key_secret))
       ? await encrypt(String(acc.access_key_secret), encKey)
@@ -63,4 +65,7 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
         acc.schedule_blocked_by_traffic ? 1 : 0, new Date().toISOString().substring(0, 7)
       ).run();
   }
+
+  // Remove old accounts that weren't replaced
+  await db.prepare('DELETE FROM accounts WHERE is_deleted = 3').run();
 }
