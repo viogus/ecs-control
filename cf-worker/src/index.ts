@@ -64,7 +64,7 @@ async function handleConfig(env: Env, _body: any, jwt: JwtPayload): Promise<Resp
         const groups = JSON.parse(r.value);
         for (const g of groups) { if (g.AccessKeySecret) g.AccessKeySecret = '********'; }
         cfg[r.key] = JSON.stringify(groups);
-      } catch { cfg[r.key] = r.value; }
+      } catch { cfg[r.key] = '[]'; }
     } else if (MASKED_SETTINGS.has(r.key) && r.value) {
       cfg[r.key] = '********';
     } else {
