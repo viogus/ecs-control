@@ -175,8 +175,11 @@ async function handleExport(env: Env): Promise<Response> {
       cf_zone_id: settingsData['ddns_cf_zone_id'] || '', cf_token: settingsData['ddns_cf_token'] || '',
       cf_proxied: settingsData['ddns_cf_proxied'] === '1',
     },
-    accounts: rawAccounts.results.map(a => ({
-      access_key_id: String(a.access_key_id ?? ''), access_key_secret: String(a.access_key_secret ?? ''),
+    accounts: await Promise.all(rawAccounts.results.map(async a => {
+      let secret = String(a.access_key_secret ?? '');
+      if (isEncrypted(secret)) { try { secret = await decrypt(secret, env.ENCRYPTION_KEY); } catch { /* keep raw */ } }
+      return {
+      access_key_id: String(a.access_key_id ?? ''), access_key_secret: secret,
       region_id: String(a.region_id ?? ''), instance_id: String(a.instance_id ?? ''),
       max_traffic: Number(a.max_traffic ?? 0), instance_status: String(a.instance_status ?? ''),
       remark: String(a.remark ?? ''), site_type: String(a.site_type ?? ''), group_key: String(a.group_key ?? ''),
@@ -189,7 +192,7 @@ async function handleExport(env: Env): Promise<Response> {
       schedule_start_enabled: Number(a.schedule_start_enabled ?? 0), schedule_stop_enabled: Number(a.schedule_stop_enabled ?? 0),
       start_time: String(a.start_time ?? ''), stop_time: String(a.stop_time ?? ''),
       schedule_blocked_by_traffic: Number(a.schedule_blocked_by_traffic ?? 0),
-    })),
+    }})),
     account_groups: JSON.parse(groupJson),
   }});
 }
@@ -298,6 +301,7 @@ export default {
         await env.DB.prepare('INSERT INTO login_attempts (ip, attempt_time) VALUES (?, ?)').bind(ip, Math.floor(Date.now() / 1000)).run();
         return jsonResponse({ success: false, message: '密码错误' });
       }
+      await env.DB.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run();
       const csrf = generateCsrfToken();
       const token = await signJwt({ role: 'admin', csrf_token: csrf }, env.JWT_SECRET);
       return jsonResponse({ success: true, token, csrf_token: csrf });
@@ -309,13 +313,15 @@ export default {
       if (existingPwd) return jsonResponse({ success: false, message: '已初始化' }, 403);
       if (!password || password.length < 8) return jsonResponse({ success: false, message: '密码至少需要8个字符' });
       if (password.length > 72) return jsonResponse({ success: false, message: '密码最多72个字符' });
+      // Import first — if it fails, the instance stays uninitialized so the user can retry
+      if (migration) {
+        try { await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration); }
+        catch (e: any) { return jsonResponse({ success: false, message: `迁移数据导入失败: ${e.message}` }, 400); }
+      }
+      // Save user's chosen password AFTER import (overrides any password from migration)
       const hashed = await hashPassword(password);
       await saveSetting(env.DB, 'admin_password', hashed);
       await saveSetting(env.DB, 'traffic_threshold', '95');
-      if (migration) {
-        try { await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration); }
-        catch (e: any) { return jsonResponse({ success: false, message: `迁移数据导入失败: ${e.message}` }); }
-      }
       const csrf = generateCsrfToken();
       const token = await signJwt({ role: 'admin', csrf_token: csrf }, env.JWT_SECRET);
       return jsonResponse({ success: true, token, csrf_token: csrf });

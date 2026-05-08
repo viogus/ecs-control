@@ -22,10 +22,10 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   await set('notify_host', String(n.host ?? ''));
   await set('notify_port', String(n.port ?? '465'));
   await set('notify_username', String(n.username ?? ''));
-  if (n.password) await set('notify_password', String(n.password));
+  if (n.password && n.password !== '********') await set('notify_password', String(n.password));
   await set('notify_secure', String(n.secure ?? 'ssl'));
   await set('notify_tg_enabled', n.tg_enabled ? '1' : '0');
-  if (n.tg_token) await set('notify_tg_token', String(n.tg_token));
+  if (n.tg_token && n.tg_token !== '********') await set('notify_tg_token', String(n.tg_token));
   await set('notify_tg_chat_id', String(n.tg_chat_id ?? ''));
   await set('notify_wh_enabled', n.wh_enabled ? '1' : '0');
   await set('notify_wh_url', String(n.wh_url ?? ''));
@@ -35,7 +35,7 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   await set('ddns_enabled', d.enabled ? '1' : '0');
   await set('ddns_domain', String(d.domain ?? ''));
   await set('ddns_cf_zone_id', String(d.cf_zone_id ?? ''));
-  if (d.cf_token) await set('ddns_cf_token', String(d.cf_token));
+  if (d.cf_token && d.cf_token !== '********') await set('ddns_cf_token', String(d.cf_token));
   await set('ddns_cf_proxied', d.cf_proxied ? '1' : '0');
 
   // Store account groups
