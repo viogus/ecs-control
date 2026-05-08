@@ -71,9 +71,8 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   try {
     await db.prepare("DELETE FROM accounts WHERE import_id = ? AND is_deleted = 0").bind(importId).run();
   } catch (e) {
-    // New accounts are already visible — demote and delete them to restore old state
-    await db.prepare("UPDATE accounts SET is_deleted = 4 WHERE import_id = ? AND is_deleted = 0").bind(newImportId).run();
-    await db.prepare('DELETE FROM accounts WHERE import_id = ? AND is_deleted = 4').bind(newImportId).run();
+    // Restore old settings, clear old markers, and delete new accounts
+    await rollback(db, importId, newImportId, settingsSnapshot, writtenKeys);
     throw e;
   }
   // Old accounts deleted — remaining cleanup can't delete new accounts
