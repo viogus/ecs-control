@@ -23,6 +23,7 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   const writtenKeys = new Set<string>();
 
   // Phase 1: tag old accounts (keep visible), insert new ones hidden (is_deleted=4)
+  const newImportId = importId + '_new';
   await db.prepare("UPDATE accounts SET import_id = ? WHERE is_deleted = 0").bind(importId).run();
 
   try {
@@ -42,11 +43,11 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
         acc.schedule_enabled ? 1 : 0, acc.schedule_start_enabled ? 1 : 0, acc.schedule_stop_enabled ? 1 : 0,
         acc.start_time || '', acc.stop_time || '',
         acc.schedule_blocked_by_traffic ? 1 : 0, new Date().toISOString().substring(0, 7),
-        importId
+        newImportId
       ).run();
     }
   } catch (e) {
-    await rollback(db, importId, settingsSnapshot, writtenKeys);
+    await rollback(db, importId, newImportId, settingsSnapshot, writtenKeys);
     throw e;
   }
 
@@ -54,16 +55,18 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   try {
     await writeSettings(db, data, opts, writtenKeys);
   } catch (e) {
-    await rollback(db, importId, settingsSnapshot, writtenKeys);
+    await rollback(db, importId, newImportId, settingsSnapshot, writtenKeys);
     throw e;
   }
 
-  // Phase 3: promote new accounts first, then clean up old ones
+  // Phase 3: promote new accounts (4→0), capture old IDs, delete old, clear markers
   try {
-    await db.prepare("UPDATE accounts SET is_deleted = 0, import_id = '' WHERE import_id = ? AND is_deleted = 4").bind(importId).run();
+    await db.prepare("UPDATE accounts SET is_deleted = 0 WHERE import_id = ? AND is_deleted = 4").bind(newImportId).run();
+    // Delete old accounts that were tagged in Phase 1 (no longer needed)
     await db.prepare("DELETE FROM accounts WHERE import_id = ? AND is_deleted = 0").bind(importId).run();
+    await db.prepare("UPDATE accounts SET import_id = '' WHERE import_id = ?").bind(newImportId).run();
   } catch (e) {
-    await rollback(db, importId, settingsSnapshot, writtenKeys);
+    await rollback(db, importId, newImportId, settingsSnapshot, writtenKeys);
     throw e;
   }
 }
@@ -106,8 +109,8 @@ async function writeSettings(db: D1Database, data: MigrationExport, opts: Import
   await set('account_groups', JSON.stringify(data.account_groups));
 }
 
-async function rollback(db: D1Database, importId: string, snapshot: Record<string, string> | null, writtenKeys: Set<string>): Promise<void> {
-  // Restore settings: write back snapshot values, delete keys that didn't exist before
+async function rollback(db: D1Database, importId: string, newImportId: string, snapshot: Record<string, string> | null, writtenKeys: Set<string>): Promise<void> {
+  // Restore settings
   if (snapshot) {
     for (const k of writtenKeys) {
       if (snapshot[k] !== undefined) {
@@ -117,7 +120,7 @@ async function rollback(db: D1Database, importId: string, snapshot: Record<strin
       }
     }
   }
-  // Restore old accounts (clear import_id) and remove new staged ones (is_deleted=4)
-  await db.prepare("UPDATE accounts SET import_id = '' WHERE import_id = ? AND is_deleted = 0").bind(importId).run();
-  await db.prepare('DELETE FROM accounts WHERE import_id = ? AND is_deleted = 4').bind(importId).run();
+  // Delete new staged accounts, restore old accounts
+  await db.prepare("DELETE FROM accounts WHERE import_id = ?").bind(newImportId).run();
+  await db.prepare("UPDATE accounts SET import_id = '' WHERE import_id = ?").bind(importId).run();
 }
