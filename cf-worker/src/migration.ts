@@ -7,6 +7,35 @@ export interface ImportOptions { skipPassword?: boolean; skipDefaults?: boolean;
 export async function importFromDocker(db: D1Database, encKey: string, data: MigrationExport, opts: ImportOptions = {}): Promise<void> {
   if (data.version !== 1) throw new Error(`Unsupported export version: ${data.version}`);
 
+  // Phase 1: stage new accounts — mark old ones, insert new ones
+  await db.prepare("UPDATE accounts SET is_deleted = 3 WHERE is_deleted = 0").run();
+
+  try {
+    for (const acc of data.accounts) {
+      const secret = acc.access_key_secret && !isEncrypted(String(acc.access_key_secret))
+        ? await encrypt(String(acc.access_key_secret), encKey)
+        : String(acc.access_key_secret ?? '');
+      await db.prepare(`INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,instance_status,remark,site_type,group_key,instance_name,instance_type,internet_max_bandwidth_out,public_ip,public_ip_mode,eip_allocation_id,eip_address,eip_managed,cpu,memory,os_name,schedule_enabled,schedule_start_enabled,schedule_stop_enabled,start_time,stop_time,schedule_blocked_by_traffic,traffic_billing_month) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(
+          acc.access_key_id, secret, acc.region_id, acc.instance_id || '',
+          acc.max_traffic || 0, acc.instance_status || 'Unknown',
+          acc.remark || '', acc.site_type || 'international', acc.group_key || '',
+          acc.instance_name || '', acc.instance_type || '', acc.internet_max_bandwidth_out || 0,
+          acc.public_ip || '', acc.public_ip_mode || 'ecs_public_ip',
+          acc.eip_allocation_id || '', acc.eip_address || '', acc.eip_managed ? 1 : 0,
+          acc.cpu || 0, acc.memory || 0, acc.os_name || '',
+          acc.schedule_enabled ? 1 : 0, acc.schedule_start_enabled ? 1 : 0, acc.schedule_stop_enabled ? 1 : 0,
+          acc.start_time || '', acc.stop_time || '',
+          acc.schedule_blocked_by_traffic ? 1 : 0, new Date().toISOString().substring(0, 7)
+        ).run();
+    }
+  } catch (e) {
+    // Rollback: restore old accounts if any insert fails
+    await db.prepare("UPDATE accounts SET is_deleted = 0 WHERE is_deleted = 3").run();
+    throw e;
+  }
+
+  // Phase 2: all accounts OK — now safe to write settings and cleanup
   const s = data.settings;
   const set = (k: string, v: string) => saveSetting(db, k, v);
   if (!opts.skipPassword) await set('admin_password', String(s.admin_password ?? ''));
@@ -40,32 +69,8 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   if (d.cf_token && d.cf_token !== '********') await set('ddns_cf_token', String(d.cf_token));
   await set('ddns_cf_proxied', d.cf_proxied ? '1' : '0');
 
-  // Store account groups
   await set('account_groups', JSON.stringify(data.account_groups));
 
-  // Import accounts first, then delete old ones — prevents data loss if insert fails
-  // Mark existing accounts for cleanup
-  await db.prepare("UPDATE accounts SET is_deleted = 3 WHERE is_deleted = 0").run();
-
-  for (const acc of data.accounts) {
-    const secret = acc.access_key_secret && !isEncrypted(String(acc.access_key_secret))
-      ? await encrypt(String(acc.access_key_secret), encKey)
-      : String(acc.access_key_secret ?? '');
-    await db.prepare(`INSERT INTO accounts (access_key_id,access_key_secret,region_id,instance_id,max_traffic,instance_status,remark,site_type,group_key,instance_name,instance_type,internet_max_bandwidth_out,public_ip,public_ip_mode,eip_allocation_id,eip_address,eip_managed,cpu,memory,os_name,schedule_enabled,schedule_start_enabled,schedule_stop_enabled,start_time,stop_time,schedule_blocked_by_traffic,traffic_billing_month) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(
-        acc.access_key_id, secret, acc.region_id, acc.instance_id || '',
-        acc.max_traffic || 0, acc.instance_status || 'Unknown',
-        acc.remark || '', acc.site_type || 'international', acc.group_key || '',
-        acc.instance_name || '', acc.instance_type || '', acc.internet_max_bandwidth_out || 0,
-        acc.public_ip || '', acc.public_ip_mode || 'ecs_public_ip',
-        acc.eip_allocation_id || '', acc.eip_address || '', acc.eip_managed ? 1 : 0,
-        acc.cpu || 0, acc.memory || 0, acc.os_name || '',
-        acc.schedule_enabled ? 1 : 0, acc.schedule_start_enabled ? 1 : 0, acc.schedule_stop_enabled ? 1 : 0,
-        acc.start_time || '', acc.stop_time || '',
-        acc.schedule_blocked_by_traffic ? 1 : 0, new Date().toISOString().substring(0, 7)
-      ).run();
-  }
-
-  // Remove old accounts that weren't replaced
+  // Phase 3: remove old accounts
   await db.prepare('DELETE FROM accounts WHERE is_deleted = 3').run();
 }
