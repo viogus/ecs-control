@@ -87,9 +87,10 @@ function test_protected_action_requires_login(): void
     $app = new FakeRouterApp();
 
     $output = dispatch_router('get_config', $app);
+    $payload = json_decode($output, true);
 
     assert_same(403, http_response_code(), 'protected action should return HTTP 403');
-    assert_same('{"error":"请先登录后再操作"}', $output, 'protected action should keep the existing auth error JSON');
+    assert_same(['error' => '请先登录后再操作'], $payload, 'protected action should keep the existing auth error JSON');
     assert_same([], $app->calls, 'protected action should not call the app when unauthenticated');
 }
 
@@ -117,9 +118,10 @@ function test_mutating_action_requires_valid_csrf_before_calling_app(): void
 
     $app = new FakeRouterApp();
     $output = dispatch_router('control_instance', $app);
+    $payload = json_decode($output, true);
 
     assert_same(403, http_response_code(), 'invalid CSRF should return HTTP 403');
-    assert_same('{"error":"CSRF 验证失败，请刷新页面后重试"}', $output, 'invalid CSRF should keep the existing CSRF error JSON');
+    assert_same(['error' => 'CSRF 验证失败，请刷新页面后重试'], $payload, 'invalid CSRF should keep the existing CSRF error JSON');
     assert_same([], $app->calls, 'invalid CSRF should stop before calling mutating app methods');
 }
 
@@ -138,15 +140,17 @@ function test_control_instance_invalid_action_keeps_bad_request_response(): void
     $app = new FakeRouterApp();
     $output = dispatch_router('control_instance', $app);
     unset($GLOBALS['HTTP_ROUTER_TEST_INPUT']);
+    $payload = json_decode($output, true);
 
     assert_same(400, http_response_code(), 'invalid instance action should return HTTP 400');
-    assert_same('{"success":false,"message":"无效的操作类型"}', $output, 'invalid instance action should keep existing JSON');
+    assert_same(['success' => false, 'message' => '无效的操作类型'], $payload, 'invalid instance action should keep existing JSON');
     assert_same([], $app->calls, 'invalid instance action should not call the app');
 }
 
 function test_unknown_action_renders_template(): void
 {
     reset_router_state();
+    $_SESSION['is_admin'] = true;
     $app = new FakeRouterApp();
 
     $output = dispatch_router('unknown_action', $app);
