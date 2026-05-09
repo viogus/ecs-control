@@ -10,6 +10,7 @@ require_once 'TelegramControlService.php';
 require_once 'src/EcsProvisionService.php';
 require_once 'src/BssService.php';
 require_once 'src/ExportService.php';
+require_once 'src/AdminSupportService.php';
 
 use AlibabaCloud\Client\Exception\ClientException;
 use AlibabaCloud\Client\Exception\ServerException;
@@ -26,6 +27,7 @@ class AliyunTrafficCheck
     private $responseBuilder;
     private $instanceActionService;
     private $exportService;
+    private $adminSupportService;
     private $initError = null;
 
 
@@ -48,6 +50,9 @@ class AliyunTrafficCheck
                 $this->notificationService, $this->ddnsService, $this->bssService
             );
             $this->exportService = new ExportService($this->configManager);
+            $this->adminSupportService = new AdminSupportService(
+                $this->db, $this->configManager, $this->notificationService, __DIR__
+            );
 
             // 注入配置到通知服务
             $this->notificationService->setConfig($this->configManager->getAllSettings());
@@ -221,51 +226,7 @@ class AliyunTrafficCheck
             return ['success' => false, 'message' => $this->initError];
         }
 
-        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            return ['success' => false, 'message' => 'Logo 上传失败，请重新选择图片'];
-        }
-
-        if (($file['size'] ?? 0) <= 0 || ($file['size'] ?? 0) > 2 * 1024 * 1024) {
-            return ['success' => false, 'message' => 'Logo 图片大小需小于 2MB'];
-        }
-
-        $tmp = $file['tmp_name'] ?? '';
-        if ($tmp === '' || !is_uploaded_file($tmp)) {
-            return ['success' => false, 'message' => 'Logo 文件无效'];
-        }
-
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mime = $finfo->file($tmp);
-        $allowed = [
-            'image/png' => 'png',
-            'image/jpeg' => 'jpg',
-            'image/webp' => 'webp'
-        ];
-
-        if (!isset($allowed[$mime])) {
-            return ['success' => false, 'message' => '仅支持 PNG、JPG、WebP 图片'];
-        }
-
-        $dir = __DIR__ . '/data';
-        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
-            return ['success' => false, 'message' => 'Logo 存储目录不可写'];
-        }
-
-        foreach (glob($dir . '/brand-logo.*') ?: [] as $oldFile) {
-            @unlink($oldFile);
-        }
-
-        $target = $dir . '/brand-logo.' . $allowed[$mime];
-        if (!@move_uploaded_file($tmp, $target)) {
-            return ['success' => false, 'message' => 'Logo 保存失败，请检查 data 目录权限'];
-        }
-
-        @chmod($target, 0644);
-        $url = 'index.php?action=brand_logo&v=' . filemtime($target);
-        $this->configManager->updateAppLogoUrl($url);
-        $this->db->addLog('info', '页面 Logo 已更新');
-
-        return ['success' => true, 'url' => $url];
+        return $this->adminSupportService->uploadLogo($file);
     }
 
     public function getConfigForFrontend(): array
@@ -279,38 +240,7 @@ class AliyunTrafficCheck
         if ($this->initError)
             return [];
 
-        if ($tab === 'heartbeat') {
-            // 心跳日志：只看 heartbeat 类型
-            $types = ['heartbeat'];
-        } else {
-            // 动作日志：只看 info 和 warning，排除 error (超时/接口错误)
-            $types = ['info', 'warning'];
-        }
-
-        // 仅返回最近 20 条
-        $logs = $this->db->getLogsByTypes($types, 20);
-        $accounts = $this->configManager->getAccounts();
-        $accessKeyMap = [];
-
-        foreach ($accounts as $account) {
-            $label = Helpers::getAccountLogLabel($account);
-            $accessKeyId = trim((string) ($account['access_key_id'] ?? ''));
-            if ($accessKeyId === '') {
-                continue;
-            }
-
-            $accessKeyMap[$accessKeyId] = $label;
-            $accessKeyMap[substr($accessKeyId, 0, 7) . '***'] = $label;
-        }
-
-        foreach ($logs as &$log) {
-            foreach ($accessKeyMap as $key => $label) {
-                $log['message'] = str_replace("[$key]", "[$label]", $log['message']);
-                $log['message'] = str_replace($key, $label, $log['message']);
-            }
-            $log['time_str'] = date('Y-m-d H:i:s', $log['created_at']);
-        }
-        return $logs;
+        return $this->adminSupportService->getSystemLogs($tab);
     }
 
     // --- 新增：清空日志并重排 ID ---
@@ -319,19 +249,7 @@ class AliyunTrafficCheck
         if ($this->initError)
             return false;
 
-        $result = false;
-        if ($tab === 'heartbeat') {
-            $result = $this->db->clearLogsByTypes(['heartbeat']);
-        } else {
-            $result = $this->db->clearLogsByTypes(['info', 'warning', 'error']);
-        }
-
-        // 关键改动：清空后立即重排剩余 ID
-        if ($result) {
-            $this->db->reorderLogsIds();
-        }
-
-        return $result;
+        return $this->adminSupportService->clearSystemLogs($tab);
     }
 
     public function getAccountHistory($id): array
@@ -339,34 +257,7 @@ class AliyunTrafficCheck
         if ($this->initError)
             return [];
 
-        $account = $this->configManager->getAccountById($id);
-        if (!$account)
-            return ['error' => 'Account not found'];
-
-        // Use account ID for stats query
-        $rawHourly = $this->db->getHourlyStats($id);
-        $chartHourly = [];
-        foreach ($rawHourly as $row) {
-            $chartHourly[] = [
-                'time' => date('H:00', $row['recorded_at']),
-                'full_time' => date('Y-m-d H:i', $row['recorded_at']),
-                'value' => round($row['traffic'], 3)
-            ];
-        }
-
-        $rawDaily = $this->db->getDailyStats($id);
-        $chartDaily = [];
-        foreach ($rawDaily as $row) {
-            $chartDaily[] = [
-                'date' => date('Y-m-d', $row['recorded_at']),
-                'value' => round($row['traffic'], 3)
-            ];
-        }
-
-        return [
-            'history_24h' => $chartHourly,
-            'history_30d' => $chartDaily
-        ];
+        return $this->adminSupportService->getAccountHistory($id);
     }
 
     // --- 核心监控逻辑 ---
@@ -901,17 +792,17 @@ class AliyunTrafficCheck
 
     public function sendTestEmail($to)
     {
-        return $this->notificationService->sendTestEmail($to);
+        return $this->adminSupportService->sendTestEmail($to);
     }
 
     public function sendTestTelegram($data)
     {
-        return $this->notificationService->sendTestTelegram($data);
+        return $this->adminSupportService->sendTestTelegram($data);
     }
 
     public function sendTestWebhook($data)
     {
-        return $this->notificationService->sendTestWebhook($data);
+        return $this->adminSupportService->sendTestWebhook($data);
     }
 
     public function renderTemplate(): string
