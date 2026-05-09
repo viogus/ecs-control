@@ -1,13 +1,18 @@
 <?php
 
 require_once __DIR__ . '/../src/Helpers.php';
+require_once __DIR__ . '/../Database.php';
 require_once __DIR__ . '/../src/EcsCreateService.php';
 
-final class FakeEcsCreateDb
+final class FakeEcsCreateDb extends Database
 {
     public array $logs = [];
     public array $tasks = [];
     public array $taskUpdates = [];
+
+    public function __construct()
+    {
+    }
 
     public function addLog($type, $message): void
     {
@@ -250,7 +255,7 @@ function fake_create_result(): array
 
 function test_preview_success_returns_payload_and_logs(): void
 {
-    $_SERVER = ['REMOTE_ADDR' => '203.0.113.10'];
+    $_SERVER = ['REMOTE_ADDR' => '8.8.8.8'];
     $db = new FakeEcsCreateDb();
     $config = fake_ecs_create_config();
     $provision = fake_ecs_provision();
@@ -267,7 +272,7 @@ function test_preview_success_returns_payload_and_logs(): void
     assert_same_ecs_create(fake_preview(), $result['summary'], 'preview summary should come from provision service');
     assert_same_ecs_create(['available' => false], $result['pricing'], 'pricing should be exposed directly');
     assert_same_ecs_create(['warn'], $result['warnings'], 'warnings should be exposed directly');
-    assert_same_ecs_create('203.0.113.10', $provision->previewCalls[0]['clientIp'], 'public client IP should be forwarded to preview builder');
+    assert_same_ecs_create('8.8.8.8', $provision->previewCalls[0]['clientIp'], 'public client IP should be forwarded to preview builder');
     assert_same_ecs_create('cn-shanghai', $provision->previewCalls[0]['account']['region_id'], 'requested region should override group region');
     assert_same_ecs_create('ECS 创建预检完成 [prod] cn-shanghai ecs.e-c4m1.large', $db->logs[0]['message'], 'preview success log should keep shape');
 }
