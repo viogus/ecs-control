@@ -243,7 +243,7 @@ class MonitorService
         $s['requiresTrafficProtection'] = $this->handleTrafficCircuitBreaker($account, $currentTime, $threshold, $shutdownMode, $thresholdAction, $s);
 
         // 2b. 费用熔断
-        $costBlocked = $this->handleCostCircuitBreaker($account, $currentTime, $shutdownMode, $s);
+        $this->handleCostCircuitBreaker($account, $currentTime, $shutdownMode, $s);
 
         // 3. 定时开关机
         $this->handleScheduledOps($account, $currentTime, $shutdownMode, $s);
@@ -545,7 +545,7 @@ class MonitorService
     private function handleKeepAlive($account, int $currentTime, bool $keepAlive, array &$s): void
     {
         $autoStartBlocked = !empty($account['auto_start_blocked']);
-        if (!$keepAlive || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false)) {
+        if (!$keepAlive || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic']) {
             return;
         }
 
