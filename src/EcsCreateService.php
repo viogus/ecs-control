@@ -173,11 +173,13 @@ class EcsCreateService
 
     private function detectClientPublicIp()
     {
-        // Only trust Cloudflare headers when behind Cloudflare (REMOTE_ADDR is a CF IP)
-        $fromCf = in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true);
+        // Trust proxy headers only when REMOTE_ADDR is a private/loopback IP (reverse proxy)
+        $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+        $fromProxy = !filter_var($remote, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
+            || in_array($remote, ['127.0.0.1', '::1'], true);
 
         $candidates = [];
-        if ($fromCf && !empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+        if ($fromProxy && !empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
             $candidates[] = trim((string) $_SERVER['HTTP_CF_CONNECTING_IP']);
         }
         foreach (['HTTP_X_REAL_IP', 'REMOTE_ADDR'] as $key) {

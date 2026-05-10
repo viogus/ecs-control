@@ -167,7 +167,8 @@ class Account implements \ArrayAccess
     {
         $prop = self::FIELD_MAP[$offset] ?? null;
         if ($prop !== null) {
-            $this->$prop = match ((new \ReflectionProperty(self::class, $prop))->getType()->getName()) {
+            self::initPropertyTypes();
+            $this->$prop = match (self::$propertyTypes[$prop] ?? 'string') {
                 'int' => 0, 'float' => 0.0, 'string' => '', 'bool' => false, default => null,
             };
         }
