@@ -1,7 +1,7 @@
 import type { Account, AccountGroup } from './types';
 import { decrypt, encrypt } from './crypto';
 import { getInstances } from './aliyun-api';
-import { rowToAccount, getAccounts } from './db';
+import { rowToAccount, getAccounts, addLog } from './db';
 
 export async function buildGroupKey(accessKeyId: string, regionId: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(`${accessKeyId}|${regionId}`));
@@ -122,11 +122,14 @@ export async function syncAccountGroups(
       }
     }
 
-    // Remove instances no longer in remote
+    // Remove instances no longer in remote (only if API returned data — empty response = API failure)
+    if (remoteIds.size > 0) {
     for (const a of existingForGroup) {
       if (!remoteIds.has(a.instance_id)) {
+        onLog?.('warning', `Removing instance not found in remote [${a.instance_id}] (group: ${group.groupKey})`);
         await db.prepare('DELETE FROM accounts WHERE id = ?').bind(a.id).run();
       }
+    }
     }
   }
 
@@ -135,6 +138,7 @@ export async function syncAccountGroups(
   for (const a of existing) {
     const gk = a.group_key || await buildGroupKey(a.access_key_id, a.region_id);
     if (!configuredKeys.has(gk)) {
+      onLog?.('warning', `Removing orphaned group instance [${a.instance_id}] (group removed from config)`);
       await db.prepare('DELETE FROM accounts WHERE id = ?').bind(a.id).run();
     }
   }
