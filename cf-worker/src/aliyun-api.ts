@@ -115,6 +115,20 @@ export async function getBillOverview(account: Account, billingCycle: string): P
   return { TotalCost: Math.round(cost * 100) / 100 };
 }
 
+export async function getInstanceBill(account: Account, billingCycle: string): Promise<{ TotalCost: number }> {
+  if (!account.instance_id) return { TotalCost: 0 };
+  const bssRegion = account.site_type === 'international' ? 'ap-southeast-1' : 'cn-hangzhou';
+  const r = await signedRequest({
+    ...ak(account), endpoint: `business.${bssRegion}.aliyuncs.com`,
+    action: 'DescribeInstanceBill', version: '2017-12-14',
+    params: { BillingCycle: billingCycle, InstanceID: account.instance_id, Granularity: 'MONTHLY' },
+  });
+  const items = (r.Data as any)?.Items ?? [];
+  let cost = 0;
+  for (const item of items) cost += parseFloat(item.PretaxAmount ?? 0);
+  return { TotalCost: Math.round(cost * 100) / 100 };
+}
+
 // === CMS (CloudMonitor) ===
 // Reserved for per-instance traffic tracking. Currently CDT getTraffic() covers total account traffic.
 export async function getInstanceOutboundBytes(account: Account, startMs: number, endMs: number): Promise<number> {

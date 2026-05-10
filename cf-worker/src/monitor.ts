@@ -1,6 +1,6 @@
 import type { Env, Account, TrafficResult } from './types';
 import { getSettings, getSetting, updateAccountStatus, addLog } from './db';
-import { getTraffic, getInstanceStatus, controlInstance } from './aliyun-api';
+import { getTraffic, getInstanceStatus, controlInstance, getInstanceBill } from './aliyun-api';
 
 function isCredentialError(msg: string): boolean {
   const normalized = msg.toLowerCase();
@@ -92,6 +92,27 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
           .bind(account.id).run();
       } catch (e: any) {
         await addLog(env.DB, 'error', `Circuit break STOP failed [${label}]: ${e.message}`);
+      }
+    }
+  }
+
+  // Cost circuit breaker
+  const costEnabled = await getSetting(env.DB, 'cost_threshold_enabled', '0') === '1';
+  if (costEnabled && status === 'Running' && !account.protection_suspended) {
+    const costThreshold = parseFloat(await getSetting(env.DB, 'cost_threshold', '0.48'));
+    if (costThreshold > 0) {
+      try {
+        const bill = await getInstanceBill(account, new Date().toISOString().substring(0, 7));
+        if (bill.TotalCost >= costThreshold) {
+          await controlInstance(account, 'stop', shutdownMode);
+          await addLog(env.DB, 'warning', `Cost circuit break: STOP [${label}] $${bill.TotalCost.toFixed(2)} >= $${costThreshold}`);
+          logs.push(`[${label}] Cost break: STOP ($${bill.TotalCost.toFixed(2)})`);
+          await updateAccountStatus(env.DB, account.id, usedTraffic, 'Stopping', now);
+          await env.DB.prepare('UPDATE accounts SET schedule_blocked_by_traffic = 1 WHERE id = ?')
+            .bind(account.id).run();
+        }
+      } catch (e: any) {
+        await addLog(env.DB, 'warning', `Cost check failed [${label}]: ${e.message}`);
       }
     }
   }

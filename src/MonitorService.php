@@ -10,14 +10,16 @@ class MonitorService
     private $aliyunService;
     private $notificationService;
     private $ddnsService;
+    private $bssService;
 
-    public function __construct($db, $configManager, $aliyunService, $notificationService, $ddnsService)
+    public function __construct($db, $configManager, $aliyunService, $notificationService, $ddnsService, $bssService = null)
     {
         $this->db = $db;
         $this->configManager = $configManager;
         $this->aliyunService = $aliyunService;
         $this->notificationService = $notificationService;
         $this->ddnsService = $ddnsService;
+        $this->bssService = $bssService;
     }
 
     public function run(): string
@@ -240,6 +242,9 @@ class MonitorService
         // 2. 流量熔断
         $s['requiresTrafficProtection'] = $this->handleTrafficCircuitBreaker($account, $currentTime, $threshold, $shutdownMode, $thresholdAction, $s);
 
+        // 2b. 费用熔断
+        $costBlocked = $this->handleCostCircuitBreaker($account, $currentTime, $shutdownMode, $s);
+
         // 3. 定时开关机
         $this->handleScheduledOps($account, $currentTime, $shutdownMode, $s);
 
@@ -401,6 +406,49 @@ class MonitorService
         }
 
         return true;
+    }
+
+    // ---- Phase 2b: 费用熔断 ----
+
+    private function handleCostCircuitBreaker($account, int $currentTime, string $shutdownMode, array &$s): bool
+    {
+        if (!$this->bssService) return false;
+        $enabled = $this->configManager->get('cost_threshold_enabled', '0') === '1';
+        if (!$enabled) return false;
+
+        $threshold = (float) $this->configManager->get('cost_threshold', '0.48');
+        if ($threshold <= 0) return false;
+
+        $canAttemptStop = !in_array($s['status'], ['Stopped', 'Stopping', 'Released'], true);
+        if (!$canAttemptStop) return false;
+
+        try {
+            $bill = $this->bssService->getInstanceBill(
+                $account['access_key_id'], $account['access_key_secret'],
+                $account['instance_id'], date('Y-m'), $account['site_type'] ?? 'china'
+            );
+            $cost = (float) ($bill['TotalCost'] ?? 0);
+        } catch (\Exception $e) {
+            $this->db->addLog('warning', "费用查询失败 [{$s['accountLabel']}]: " . strip_tags($e->getMessage()));
+            return false;
+        }
+
+        if ($cost >= $threshold) {
+            if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
+                $s['actions'][] = "费用超限自动停机";
+                $this->db->addLog('warning', "当月费用 \${$cost} 超过阈值 \${$threshold}，已自动停机 [{$s['accountLabel']}]");
+                $this->configManager->updateAccountStatus($account['id'], $s['traffic'], 'Stopping', $currentTime);
+                $this->configManager->updateScheduleBlockedByTrafficForGroup($s['accountGroupKey'], true);
+                $this->notifyStatusChangeIfNeeded($account, $s['status'], 'Stopping', "当月费用 \${$cost} 超过阈值，已自动停机。");
+                $s['status'] = 'Stopping';
+                $s['scheduleBlockedByTraffic'] = true;
+                return true;
+            } else {
+                $s['actions'][] = "费用超限停机失败";
+                $this->db->addLog('error', "当月费用 \${$cost} 超过阈值 \${$threshold}，但自动停机失败 [{$s['accountLabel']}]");
+            }
+        }
+        return false;
     }
 
     // ---- Phase 3: 定时开关机 ----

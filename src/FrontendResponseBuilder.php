@@ -35,6 +35,8 @@ class FrontendResponseBuilder
             'keep_alive' => ($settings['keep_alive'] ?? '0') === '1',
             'monthly_auto_start' => ($settings['monthly_auto_start'] ?? '0') === '1',
             'api_interval' => (int) ($settings['api_interval'] ?? 600),
+            'cost_threshold' => (float) ($settings['cost_threshold'] ?? 0.48),
+            'cost_threshold_enabled' => ($settings['cost_threshold_enabled'] ?? '0') === '1',
             'enable_billing' => ($settings['enable_billing'] ?? '0') === '1',
             'AppBrand' => ['logo_url' => $settings['app_logo_url'] ?? ''],
             'Notification' => [

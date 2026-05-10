@@ -235,7 +235,7 @@ class AliyunTrafficCheck
     public function monitor(): string
     {
         if ($this->initError) return "错误: " . $this->initError;
-        $monitor = new MonitorService($this->db, $this->configManager, $this->aliyunService, $this->notificationService, $this->ddnsService);
+        $monitor = new MonitorService($this->db, $this->configManager, $this->aliyunService, $this->notificationService, $this->ddnsService, $this->bssService);
         $result = $monitor->run();
         $this->instanceActionService->processPendingReleases(function($label, $account) {
             $notifyResult = $this->notificationService->notifyInstanceReleased(

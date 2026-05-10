@@ -2694,6 +2694,14 @@
                                             <input v-model.number="config.traffic_threshold" type="number" class="glass-input" min="1" max="100">
                                         </div>
                                         <div>
+                                            <label class="mb-2 block text-sm font-semibold text-[#6f7787]">
+                                                费用熔断阈值（USD）
+                                                <app-checkbox class="ml-1 align-middle" label="启用" v-model="config.cost_threshold_enabled"></app-checkbox>
+                                            </label>
+                                            <input v-model.number="config.cost_threshold" type="number" class="glass-input" step="0.01" min="0" placeholder="0.48">
+                                            <span class="mt-1 block text-xs leading-5 text-[#6f7787]">当月费用超过该值时自动停机。</span>
+                                        </div>
+                                        <div>
                                             <label class="mb-2 block text-sm font-semibold text-[#6f7787]">实例同步频率</label>
                                             <app-select
                                                 v-model="config.api_interval"
@@ -3753,7 +3761,7 @@
 
                 const createDefaultConfig = () => ({
                     admin_password: '',
-                    traffic_threshold: 95,
+                    traffic_threshold: 95, cost_threshold: 0.48, cost_threshold_enabled: false,
                     shutdown_mode: 'KeepCharging',
                     threshold_action: 'stop_and_notify',
                     keep_alive: false,
@@ -3895,7 +3903,7 @@
                 const ecsDiskHint = ref('请选择账号并填写实例规格后获取硬盘类型。');
                 const setupData = ref({
                     admin_password: '',
-                    traffic_threshold: 95,
+                    traffic_threshold: 95, cost_threshold: 0.48, cost_threshold_enabled: false,
                     shutdown_mode: 'KeepCharging'
                 });
 

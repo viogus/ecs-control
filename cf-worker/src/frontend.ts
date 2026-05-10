@@ -219,6 +219,14 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
         <h2>流量保护</h2>
         <div class="row">
           <div class="form-group"><label>流量阈值 (%)</label><input v-model.number="cfg.traffic_threshold" type="number" min="1" max="100"></div>
+          <div class="form-group">
+            <label>费用熔断 (USD)</label>
+            <div style="display:flex;align-items:center;gap:8px">
+              <label class="toggle"><input type="checkbox" v-model="cfg.cost_threshold_enabled" true-value="1" false-value="0"><span class="slider"></span></label>
+              <input v-model.number="cfg.cost_threshold" type="number" step="0.01" min="0" style="width:100px">
+            </div>
+            <span style="font-size:12px;color:#86868b">当月费用超过该值时自动停机</span>
+          </div>
           <div class="form-group"><label>停机模式</label>
             <select v-model="cfg.shutdown_mode"><option value="KeepCharging">保持收费</option><option value="StopCharging">停机不收费</option></select>
           </div>
@@ -296,6 +304,7 @@ createApp({
     // config cache
     cfg: {
       traffic_threshold: '95', shutdown_mode: 'KeepCharging',
+      cost_threshold_enabled: '0', cost_threshold: '0.48',
       keep_alive: '0',
       notify_email_enabled: '1', notify_email: '', notify_host: '', notify_port: '465',
       notify_username: '', notify_password: '', notify_secure: 'ssl',
