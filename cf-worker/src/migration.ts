@@ -91,6 +91,8 @@ async function writeSettings(db: D1Database, data: MigrationExport, opts: Import
   await set('monthly_auto_start', (String(s.monthly_auto_start) === '1' || s.monthly_auto_start === true) ? '1' : '0');
   await set('api_interval', String(s.api_interval ?? 600));
   await set('enable_billing', (String(s.enable_billing) === '1' || s.enable_billing === true) ? '1' : '0');
+  await set('cost_threshold', String(s.cost_threshold ?? '0.48'));
+  await set('cost_threshold_enabled', (String(s.cost_threshold_enabled) === '1' || s.cost_threshold_enabled === true) ? '1' : '0');
 
   const n = data.notification;
   await set('notify_email_enabled', n.email_enabled ? '1' : '0');

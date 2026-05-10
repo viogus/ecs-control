@@ -47,7 +47,7 @@ type Handler = (env: Env, body: any, jwt: JwtPayload) => Promise<Response>;
 
 async function handleStatus(env: Env): Promise<Response> {
   const accs = await getAccounts(env.DB);
-  return jsonResponse({ data: accs.filter(a => a.instance_id), system_last_run: 0, sync_interval: 600 });
+  return jsonResponse({ data: accs.filter(a => a.instance_id).map(a => { const { access_key_secret: _, ...rest } = a as any; return rest; }), system_last_run: 0, sync_interval: 600 });
 }
 
 const MASKED_SETTINGS = new Set([
@@ -185,6 +185,8 @@ async function handleExport(env: Env): Promise<Response> {
       monthly_auto_start: settingsData['monthly_auto_start'] === '1',
       api_interval: settingsData['api_interval'] || '600',
       enable_billing: settingsData['enable_billing'] === '1',
+      cost_threshold: settingsData['cost_threshold'] || '0.48',
+      cost_threshold_enabled: settingsData['cost_threshold_enabled'] === '1',
     },
     version: 1, exported_at: new Date().toISOString(),
     notification: {
@@ -203,7 +205,7 @@ async function handleExport(env: Env): Promise<Response> {
     },
     accounts: await Promise.all(rawAccounts.results.map(async a => {
       let secret = String(a.access_key_secret ?? '');
-      if (isEncrypted(secret)) { try { secret = await decrypt(secret, env.ENCRYPTION_KEY); } catch { /* keep raw */ } }
+      if (isEncrypted(secret)) { try { secret = await decrypt(secret, env.ENCRYPTION_KEY); } catch { secret = ''; } }
       return {
       access_key_id: String(a.access_key_id ?? ''), access_key_secret: secret,
       region_id: String(a.region_id ?? ''), instance_id: String(a.instance_id ?? ''),
@@ -271,7 +273,7 @@ async function handleImport(env: Env, body: any): Promise<Response> {
   const { migration } = body;
   if (!migration) return jsonResponse({ success: false, message: '缺少迁移数据' });
   try {
-    await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration, { skipPassword: true, skipDefaults: true });
+    await importFromDocker(env.DB, env.ENCRYPTION_KEY, migration, { skipPassword: true });
     return jsonResponse({ success: true, message: '数据导入成功' });
   } catch (e: any) {
     return jsonResponse({ success: false, message: '导入失败: ' + e.message });
