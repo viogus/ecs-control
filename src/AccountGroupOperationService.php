@@ -137,6 +137,8 @@ class AccountGroupOperationService
         }
 
         $accountsBeforeSync = $this->configManager->getAccounts();
+        // syncAccountGroups reconciles the full configured set, so use all groups here
+        // and filter refresh work to the clicked group afterwards.
         $this->configManager->syncAccountGroups(true);
         $this->configManager->load();
 
@@ -212,26 +214,12 @@ class AccountGroupOperationService
 
     private function resolveSecretFromDatabase($accessKeyId, $regionId, $groupKey = '')
     {
+        $pdo = $this->db->getPdo();
         $groupKey = trim((string) $groupKey);
 
-        if (method_exists($this->db, 'getPdo')) {
-            $pdo = $this->db->getPdo();
-
-            if ($groupKey !== '') {
-                $stmt = $pdo->prepare("SELECT access_key_secret FROM accounts WHERE group_key = ? LIMIT 1");
-                $stmt->execute([$groupKey]);
-                $row = $stmt->fetch();
-
-                if ($row && !empty($row['access_key_secret'])) {
-                    $secret = $this->configManager->decryptAccountSecret($row['access_key_secret']);
-                    if (!empty($secret)) {
-                        return $secret;
-                    }
-                }
-            }
-
-            $stmt = $pdo->prepare("SELECT access_key_secret FROM accounts WHERE access_key_id = ? AND region_id = ? LIMIT 1");
-            $stmt->execute([$accessKeyId, $regionId]);
+        if ($groupKey !== '') {
+            $stmt = $pdo->prepare("SELECT access_key_secret FROM accounts WHERE group_key = ? LIMIT 1");
+            $stmt->execute([$groupKey]);
             $row = $stmt->fetch();
 
             if ($row && !empty($row['access_key_secret'])) {
@@ -239,6 +227,17 @@ class AccountGroupOperationService
                 if (!empty($secret)) {
                     return $secret;
                 }
+            }
+        }
+
+        $stmt = $pdo->prepare("SELECT access_key_secret FROM accounts WHERE access_key_id = ? AND region_id = ? LIMIT 1");
+        $stmt->execute([$accessKeyId, $regionId]);
+        $row = $stmt->fetch();
+
+        if ($row && !empty($row['access_key_secret'])) {
+            $secret = $this->configManager->decryptAccountSecret($row['access_key_secret']);
+            if (!empty($secret)) {
+                return $secret;
             }
         }
 

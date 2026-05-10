@@ -5,10 +5,70 @@ require_once __DIR__ . '/../src/AccountGroupOperationService.php';
 final class FakeAccountGroupDb
 {
     public array $logs = [];
+    private array $accounts;
+
+    public function __construct(array $accounts = [])
+    {
+        $this->accounts = $accounts;
+    }
 
     public function addLog($type, $message): void
     {
         $this->logs[] = ['type' => $type, 'message' => $message];
+    }
+
+    public function getPdo(): FakeAccountGroupPdo
+    {
+        return new FakeAccountGroupPdo($this->accounts);
+    }
+}
+
+final class FakeAccountGroupPdo
+{
+    public function __construct(private array $accounts)
+    {
+    }
+
+    public function prepare(string $query): FakeAccountGroupStatement
+    {
+        return new FakeAccountGroupStatement($this->accounts, $query);
+    }
+}
+
+final class FakeAccountGroupStatement
+{
+    private array $params = [];
+
+    public function __construct(private array $accounts, private string $query)
+    {
+    }
+
+    public function execute(array $params): bool
+    {
+        $this->params = $params;
+        return true;
+    }
+
+    public function fetch(): array|false
+    {
+        foreach ($this->accounts as $account) {
+            if (
+                str_contains($this->query, 'group_key = ?')
+                && ($account['group_key'] ?? '') === ($this->params[0] ?? null)
+            ) {
+                return $account;
+            }
+
+            if (
+                str_contains($this->query, 'access_key_id = ?')
+                && ($account['access_key_id'] ?? '') === ($this->params[0] ?? null)
+                && ($account['region_id'] ?? '') === ($this->params[1] ?? null)
+            ) {
+                return $account;
+            }
+        }
+
+        return false;
     }
 }
 
@@ -24,6 +84,7 @@ final class FakeAccountGroupConfig
     public array $syncCalls = [];
     public int $loadCalls = 0;
     public array $restoreCalls = [];
+    public array $decryptCalls = [];
 
     public function getAccountGroups(): array
     {
@@ -53,6 +114,16 @@ final class FakeAccountGroupConfig
     public function restoreScheduleAfterTrafficBlock($groupKey): void
     {
         $this->restoreCalls[] = $groupKey;
+    }
+
+    public function decryptAccountSecret($secretFromDb): string
+    {
+        $this->decryptCalls[] = $secretFromDb;
+        if (str_starts_with($secretFromDb, 'encrypted:')) {
+            return substr($secretFromDb, strlen('encrypted:'));
+        }
+
+        return $secretFromDb;
     }
 }
 
@@ -149,7 +220,7 @@ function fake_account_group_config(): FakeAccountGroupConfig
     $config->groups = [[
         'groupKey' => 'group-1',
         'AccessKeyId' => 'AKID1234567890',
-        'AccessKeySecret' => 'stored-secret',
+        'AccessKeySecret' => 'group-fallback-secret',
         'regionId' => 'cn-hangzhou',
         'remark' => 'prod',
     ]];
@@ -158,7 +229,7 @@ function fake_account_group_config(): FakeAccountGroupConfig
             'id' => 1,
             'group_key' => 'group-1',
             'access_key_id' => 'AKID1234567890',
-            'access_key_secret' => 'stored-secret',
+            'access_key_secret' => 'encrypted:stored-secret',
             'region_id' => 'cn-hangzhou',
             'instance_id' => 'i-1',
             'traffic_api_status' => 'ok',
@@ -196,9 +267,12 @@ function create_account_group_service(
     FakeAccountGroupResponseBuilder $responseBuilder = null,
     FakeAccountGroupDdns $ddns = null
 ): AccountGroupOperationService {
+    $config = $config ?? fake_account_group_config();
+    $db = $db ?? new FakeAccountGroupDb($config->accounts);
+
     return new AccountGroupOperationService(
-        $db ?? new FakeAccountGroupDb(),
-        $config ?? fake_account_group_config(),
+        $db,
+        $config,
         $aliyun ?? fake_account_group_aliyun(),
         $responseBuilder ?? new FakeAccountGroupResponseBuilder(),
         $ddns ?? new FakeAccountGroupDdns()
@@ -231,8 +305,8 @@ function test_fetch_instances_requires_credentials(): void
 
 function test_account_credentials_success_uses_masked_secret_and_returns_payload(): void
 {
-    $db = new FakeAccountGroupDb();
     $config = fake_account_group_config();
+    $db = new FakeAccountGroupDb($config->accounts);
     $aliyun = fake_account_group_aliyun();
     $service = create_account_group_service($db, $config, $aliyun);
 
@@ -254,7 +328,8 @@ function test_account_credentials_success_uses_masked_secret_and_returns_payload
     assert_same_account_group(60.0, $result['usageRemaining'], 'usage remaining should be calculated');
     assert_same_account_group(40.0, $result['usagePercent'], 'usage percent should be calculated');
     assert_same_account_group(1, $result['instanceCount'], 'instance count should count selected region only');
-    assert_same_account_group(['AKID1234567890', 'stored-secret'], $aliyun->getRegionsCalls[0], 'masked secret should resolve from stored account group');
+    assert_same_account_group(['encrypted:stored-secret'], $config->decryptCalls, 'masked secret should be decrypted from database row');
+    assert_same_account_group(['AKID1234567890', 'stored-secret'], $aliyun->getRegionsCalls[0], 'masked secret should resolve from stored database row');
     assert_same_account_group('账号测试成功 [prod] cn-hangzhou 实例 1 台', $db->logs[0]['message'], 'success log should keep shape');
 }
 
