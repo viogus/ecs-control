@@ -163,7 +163,7 @@ class AccountSyncService
                 }
             }
 
-            if (!empty($existingByGroup[$group['groupKey']])) {
+            if (!empty($remoteInstanceIds) && !empty($existingByGroup[$group['groupKey']])) {
                 foreach ($existingByGroup[$group['groupKey']] as $row) {
                     if (!in_array($row['instance_id'], $remoteInstanceIds, true)) {
                         $deleteStmt->execute([$row['id']]);
