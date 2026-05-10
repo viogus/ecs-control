@@ -108,7 +108,7 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
           await addLog(env.DB, 'warning', `Cost circuit break: STOP [${label}] $${bill.TotalCost.toFixed(2)} >= $${costThreshold}`);
           logs.push(`[${label}] Cost break: STOP ($${bill.TotalCost.toFixed(2)})`);
           await updateAccountStatus(env.DB, account.id, usedTraffic, 'Stopping', now);
-          await env.DB.prepare('UPDATE accounts SET schedule_blocked_by_traffic = 1 WHERE id = ?')
+          await env.DB.prepare('UPDATE accounts SET schedule_blocked_by_traffic = 1, auto_start_blocked = 1 WHERE id = ?')
             .bind(account.id).run();
         }
       } catch (e: any) {

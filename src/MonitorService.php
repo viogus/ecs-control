@@ -420,7 +420,7 @@ class MonitorService
         if ($threshold <= 0) return false;
 
         $canAttemptStop = !in_array($s['status'], ['Stopped', 'Stopping', 'Released'], true);
-        if (!$canAttemptStop) return false;
+        if (!$canAttemptStop || $s['protectionSuspended']) return false;
 
         try {
             $bill = $this->bssService->getInstanceBill(
@@ -434,12 +434,16 @@ class MonitorService
         }
 
         if ($cost >= $threshold) {
+            $previousStatus = $s['status'];
             if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
                 $s['actions'][] = "费用超限自动停机";
                 $this->db->addLog('warning', "当月费用 \${$cost} 超过阈值 \${$threshold}，已自动停机 [{$s['accountLabel']}]");
                 $this->configManager->updateAccountStatus($account['id'], $s['traffic'], 'Stopping', $currentTime);
+                $this->configManager->updateAutoStartBlocked($account['id'], true);
                 $this->configManager->updateScheduleBlockedByTrafficForGroup($s['accountGroupKey'], true);
-                $this->notifyStatusChangeIfNeeded($account, $s['status'], 'Stopping', "当月费用 \${$cost} 超过阈值，已自动停机。");
+                $this->notifyStatusChangeIfNeeded($account, $previousStatus, 'Stopping', "当月费用 \${$cost} 超过阈值，已自动停机。");
+                $notifyRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $cost, ($cost / $threshold) * 100, '费用超限自动停机', (int) $threshold);
+                Helpers::logNotificationResult($this->db, $notifyRes, $s['accountLabel']);
                 $s['status'] = 'Stopping';
                 $s['scheduleBlockedByTraffic'] = true;
                 return true;
