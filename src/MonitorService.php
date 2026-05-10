@@ -421,6 +421,7 @@ class MonitorService
 
         $canAttemptStop = !in_array($s['status'], ['Stopped', 'Stopping', 'Released'], true);
         if (!$canAttemptStop || $s['protectionSuspended']) return false;
+        if ($this->isCostQueryInCooldown($account, $currentTime)) return false;
 
         try {
             $bill = $this->bssService->getInstanceBill(
@@ -428,8 +429,10 @@ class MonitorService
                 $account['instance_id'], date('Y-m'), $account['site_type'] ?? 'china'
             );
             $cost = (float) ($bill['TotalCost'] ?? 0);
+            $this->clearCostQueryFailureCooldown($account);
         } catch (\Exception $e) {
             $this->db->addLog('warning', "费用查询失败 [{$s['accountLabel']}]: " . strip_tags($e->getMessage()));
+            $this->setCostQueryFailureCooldown($account, $currentTime + 300);
             return false;
         }
 
@@ -453,6 +456,37 @@ class MonitorService
             }
         }
         return false;
+    }
+
+    private function costQueryFailureCooldownKey($account): string
+    {
+        $accountId = (int) ($account['id'] ?? 0);
+        if ($accountId > 0) {
+            return "cost_query_failure_until_{$accountId}";
+        }
+
+        return 'cost_query_failure_until_' . md5(($account['access_key_id'] ?? '') . '|' . ($account['instance_id'] ?? ''));
+    }
+
+    private function isCostQueryInCooldown($account, int $currentTime): bool
+    {
+        $stmt = $this->db->getPdo()->prepare("SELECT value FROM settings WHERE key = ? LIMIT 1");
+        $stmt->execute([$this->costQueryFailureCooldownKey($account)]);
+        return (int) $stmt->fetchColumn() > $currentTime;
+    }
+
+    private function setCostQueryFailureCooldown($account, int $cooldownUntil): void
+    {
+        $this->db->getPdo()
+            ->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+            ->execute([$this->costQueryFailureCooldownKey($account), (string) $cooldownUntil]);
+    }
+
+    private function clearCostQueryFailureCooldown($account): void
+    {
+        $this->db->getPdo()
+            ->prepare("DELETE FROM settings WHERE key = ?")
+            ->execute([$this->costQueryFailureCooldownKey($account)]);
     }
 
     // ---- Phase 3: 定时开关机 ----
