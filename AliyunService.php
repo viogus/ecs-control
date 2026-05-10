@@ -487,20 +487,22 @@ class AliyunService
      */
     public function getInstances($key, $secret, $targetRegionId = null)
     {
-        $regions = $this->getRegions($key, $secret);
         if (!empty($targetRegionId)) {
-            $matchedRegion = null;
-            foreach ($regions as $region) {
-                if (($region['regionId'] ?? '') === $targetRegionId) {
-                    $matchedRegion = $region;
+            $localName = $targetRegionId;
+            $cacheKey = md5($key);
+            foreach (($this->regionCache[$cacheKey] ?? []) as $cachedRegion) {
+                if (($cachedRegion['regionId'] ?? '') === $targetRegionId) {
+                    $localName = $cachedRegion['localName'] ?? $targetRegionId;
                     break;
                 }
             }
 
             $regions = [[
                 'regionId' => $targetRegionId,
-                'localName' => $matchedRegion['localName'] ?? $targetRegionId
+                'localName' => $localName
             ]];
+        } else {
+            $regions = $this->getRegions($key, $secret);
         }
 
         $instances = [];
@@ -511,27 +513,7 @@ class AliyunService
             try {
                 do {
                     $result = RetryHandler::execute(function () use ($key, $secret, $region, $pageNumber) {
-                        AlibabaCloud::accessKeyClient($key, $secret)
-                            ->regionId($region['regionId'])
-                            ->asDefaultClient();
-
-                        return AlibabaCloud::rpc()
-                            ->product('Ecs')
-                            ->scheme('https')
-                            ->version('2014-05-26')
-                            ->action('DescribeInstances')
-                            ->method('POST')
-                            ->host("ecs.{$region['regionId']}.aliyuncs.com")
-                            ->options([
-                                'query' => [
-                                    'RegionId' => $region['regionId'],
-                                    'PageSize' => 100,
-                                    'PageNumber' => $pageNumber
-                                ],
-                                'connect_timeout' => 15.0,
-                                'timeout' => 30.0
-                            ])
-                            ->request();
+                        return $this->requestDescribeInstancesPage($key, $secret, $region['regionId'], $pageNumber);
                     }, 'getInstances');
 
                     $items = $result['Instances']['Instance'] ?? [];
@@ -578,6 +560,31 @@ class AliyunService
         });
 
         return $instances;
+    }
+
+    protected function requestDescribeInstancesPage($key, $secret, $regionId, $pageNumber)
+    {
+        AlibabaCloud::accessKeyClient($key, $secret)
+            ->regionId($regionId)
+            ->asDefaultClient();
+
+        return AlibabaCloud::rpc()
+            ->product('Ecs')
+            ->scheme('https')
+            ->version('2014-05-26')
+            ->action('DescribeInstances')
+            ->method('POST')
+            ->host("ecs.{$regionId}.aliyuncs.com")
+            ->options([
+                'query' => [
+                    'RegionId' => $regionId,
+                    'PageSize' => 100,
+                    'PageNumber' => $pageNumber
+                ],
+                'connect_timeout' => 15.0,
+                'timeout' => 30.0
+            ])
+            ->request();
     }
 
     // ---- EIP management ----
