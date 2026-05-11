@@ -30,7 +30,7 @@ export async function syncDdns(db: D1Database, accounts: Account[]): Promise<voi
 
       const method = existing ? 'PUT' : 'POST';
       const path = existing ? `/dns_records/${existing.id}` : '/dns_records';
-      const body = JSON.stringify({ type: 'A', name: recordName, content: ip, ttl: 1, proxied });
+      const body = JSON.stringify({ type: 'A', name: recordName, content: ip, ttl: 1, proxied, comment: 'Managed by ECS Control worker' });
 
       const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}${path}`, {
         method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body,

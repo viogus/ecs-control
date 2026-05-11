@@ -82,7 +82,7 @@ class DdnsService
             'content' => $ip,
             'ttl' => 1,
             'proxied' => ($this->config['ddns_cf_proxied'] ?? '0') === '1',
-            'comment' => 'Managed by CDT Monitor'
+            'comment' => 'Managed by ECS Control'
         ];
 
         if ($existing) {
