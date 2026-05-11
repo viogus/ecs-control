@@ -203,9 +203,10 @@ async function handleExport(env: Env): Promise<Response> {
 
   if (decryptFailures.length > 0) {
     return jsonResponse({
-      success: true, data: null,
+      success: false,
+      message: `密钥解密失败: ${decryptFailures.join(', ')}`,
       warnings: [`以下账号密钥解密失败，备份中对应密钥为空: ${decryptFailures.join(', ')}`],
-    });
+    }, 400);
   }
 
   return jsonResponse({ success: true, data: {
