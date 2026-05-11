@@ -557,7 +557,12 @@ createApp({
       this.working = true; this.exportResult = '';
       try {
         const d = await this.api('/api/export');
-        if (d.success) {
+        if (d.warnings && d.warnings.length) {
+          this.exportResult = d.warnings.join('; ');
+          alert(d.warnings.join('\n') + '\n\n请先修复密钥问题后再重新导出。');
+          return;
+        }
+        if (d.success && d.data) {
           const blob = new Blob([JSON.stringify(d.data,null,2)],{type:'application/json'});
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a'); a.href = url;

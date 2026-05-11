@@ -82,6 +82,8 @@ class ExportService
                 'monthly_auto_start' => ($settings['monthly_auto_start'] ?? '0') === '1',
                 'api_interval' => (int)($settings['api_interval'] ?? 600),
                 'enable_billing' => ($settings['enable_billing'] ?? '0') === '1',
+                'cost_threshold' => (float)($settings['cost_threshold'] ?? 0.48),
+                'cost_threshold_enabled' => ($settings['cost_threshold_enabled'] ?? '0') === '1',
             ],
             'notification' => [
                 'email_enabled' => ($settings['notify_email_enabled'] ?? '1') === '1',

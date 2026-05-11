@@ -176,6 +176,38 @@ async function handleExport(env: Env): Promise<Response> {
   for (const r of settingsRows.results) settingsData[r.key] = r.value;
   const rawAccounts = await env.DB.prepare('SELECT * FROM accounts WHERE is_deleted = 0').all<Record<string, unknown>>();
   const groupJson = settingsData['account_groups'] || '[]';
+
+  const decryptFailures: string[] = [];
+  const accounts = await Promise.all(rawAccounts.results.map(async a => {
+    const label = (a.instance_id || a.remark || a.access_key_id) as string;
+    let secret = String(a.access_key_secret ?? '');
+    if (isEncrypted(secret)) {
+      try { secret = await decrypt(secret, env.ENCRYPTION_KEY); } catch { secret = ''; decryptFailures.push(label); }
+    }
+    return {
+      access_key_id: String(a.access_key_id ?? ''), access_key_secret: secret,
+      region_id: String(a.region_id ?? ''), instance_id: String(a.instance_id ?? ''),
+      max_traffic: Number(a.max_traffic ?? 0), instance_status: String(a.instance_status ?? ''),
+      remark: String(a.remark ?? ''), site_type: String(a.site_type ?? ''), group_key: String(a.group_key ?? ''),
+      instance_name: String(a.instance_name ?? ''), instance_type: String(a.instance_type ?? ''),
+      internet_max_bandwidth_out: Number(a.internet_max_bandwidth_out ?? 0),
+      public_ip: String(a.public_ip ?? ''), public_ip_mode: String(a.public_ip_mode ?? ''),
+      eip_allocation_id: String(a.eip_allocation_id ?? ''), eip_address: String(a.eip_address ?? ''),
+      eip_managed: Number(a.eip_managed ?? 0), cpu: Number(a.cpu ?? 0), memory: Number(a.memory ?? 0),
+      os_name: String(a.os_name ?? ''), schedule_enabled: Number(a.schedule_enabled ?? 0),
+      schedule_start_enabled: Number(a.schedule_start_enabled ?? 0), schedule_stop_enabled: Number(a.schedule_stop_enabled ?? 0),
+      start_time: String(a.start_time ?? ''), stop_time: String(a.stop_time ?? ''),
+      schedule_blocked_by_traffic: Number(a.schedule_blocked_by_traffic ?? 0),
+    };
+  }));
+
+  if (decryptFailures.length > 0) {
+    return jsonResponse({
+      success: true, data: null,
+      warnings: [`以下账号密钥解密失败，备份中对应密钥为空: ${decryptFailures.join(', ')}`],
+    });
+  }
+
   return jsonResponse({ success: true, data: {
     settings: {
       admin_password: '', traffic_threshold: settingsData['traffic_threshold'] || '95',
@@ -203,24 +235,7 @@ async function handleExport(env: Env): Promise<Response> {
       cf_zone_id: settingsData['ddns_cf_zone_id'] || '', cf_token: settingsData['ddns_cf_token'] || '',
       cf_proxied: settingsData['ddns_cf_proxied'] === '1',
     },
-    accounts: await Promise.all(rawAccounts.results.map(async a => {
-      let secret = String(a.access_key_secret ?? '');
-      if (isEncrypted(secret)) { try { secret = await decrypt(secret, env.ENCRYPTION_KEY); } catch { secret = ''; } }
-      return {
-      access_key_id: String(a.access_key_id ?? ''), access_key_secret: secret,
-      region_id: String(a.region_id ?? ''), instance_id: String(a.instance_id ?? ''),
-      max_traffic: Number(a.max_traffic ?? 0), instance_status: String(a.instance_status ?? ''),
-      remark: String(a.remark ?? ''), site_type: String(a.site_type ?? ''), group_key: String(a.group_key ?? ''),
-      instance_name: String(a.instance_name ?? ''), instance_type: String(a.instance_type ?? ''),
-      internet_max_bandwidth_out: Number(a.internet_max_bandwidth_out ?? 0),
-      public_ip: String(a.public_ip ?? ''), public_ip_mode: String(a.public_ip_mode ?? ''),
-      eip_allocation_id: String(a.eip_allocation_id ?? ''), eip_address: String(a.eip_address ?? ''),
-      eip_managed: Number(a.eip_managed ?? 0), cpu: Number(a.cpu ?? 0), memory: Number(a.memory ?? 0),
-      os_name: String(a.os_name ?? ''), schedule_enabled: Number(a.schedule_enabled ?? 0),
-      schedule_start_enabled: Number(a.schedule_start_enabled ?? 0), schedule_stop_enabled: Number(a.schedule_stop_enabled ?? 0),
-      start_time: String(a.start_time ?? ''), stop_time: String(a.stop_time ?? ''),
-      schedule_blocked_by_traffic: Number(a.schedule_blocked_by_traffic ?? 0),
-    }})),
+    accounts,
     account_groups: JSON.parse(groupJson),
   }});
 }
