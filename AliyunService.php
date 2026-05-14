@@ -105,7 +105,7 @@ class AliyunService
      */
     public function getInstanceOutboundTrafficDelta($account, $startMs, $endMs)
     {
-        if (empty($account['instance_id'])) {
+        if (empty($account->instanceId)) {
             throw new \Exception('未配置 Instance ID');
         }
 
@@ -119,12 +119,12 @@ class AliyunService
         }
 
         $metricCandidates = [];
-        $publicIp = trim((string) ($account['public_ip'] ?? ''));
+        $publicIp = trim((string) ($account->publicIp ?? ''));
         if ($publicIp !== '') {
             $metricCandidates[] = [
                 'name' => 'VPC_PublicIP_InternetOutRate',
                 'dimensions' => [[
-                    'instanceId' => $account['instance_id'],
+                    'instanceId' => $account->instanceId,
                     'ip' => $publicIp
                 ]]
             ];
@@ -133,7 +133,7 @@ class AliyunService
         $metricCandidates[] = [
             'name' => 'InternetOutRate',
             'dimensions' => [[
-                'instanceId' => $account['instance_id']
+                'instanceId' => $account->instanceId
             ]]
         ];
 
@@ -141,8 +141,8 @@ class AliyunService
         foreach ($metricCandidates as $candidate) {
             try {
                 $result = $this->queryMetricRateAsBytes(
-                    $account['access_key_id'],
-                    $account['access_key_secret'],
+                    $account->accessKeyId,
+                    $account->accessKeySecret,
                     $candidate['name'],
                     $candidate['dimensions'],
                     $startMs,
@@ -268,18 +268,18 @@ class AliyunService
     public function getInstanceStatus($account)
     {
         return RetryHandler::execute(function () use ($account) {
-            AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
-                ->regionId($account['region_id'])
+            AlibabaCloud::accessKeyClient($account->accessKeyId, $account->accessKeySecret)
+                ->regionId($account->regionId)
                 ->asDefaultClient();
 
             $options = [
-                'query' => ['RegionId' => $account['region_id']],
+                'query' => ['RegionId' => $account->regionId],
                 'connect_timeout' => 10.0,
                 'timeout' => 20.0
             ];
 
-            if (!empty($account['instance_id'])) {
-                $options['query']['InstanceId.1'] = $account['instance_id'];
+            if (!empty($account->instanceId)) {
+                $options['query']['InstanceId.1'] = $account->instanceId;
             }
 
             $result = AlibabaCloud::rpc()
@@ -288,18 +288,18 @@ class AliyunService
                 ->version('2014-05-26')
                 ->action('DescribeInstanceStatus')
                 ->method('POST')
-                ->host("ecs.{$account['region_id']}.aliyuncs.com")
+                ->host("ecs.{$account->regionId}.aliyuncs.com")
                 ->options($options)
                 ->request();
 
             $statuses = $result['InstanceStatuses']['InstanceStatus'] ?? [];
             foreach ($statuses as $item) {
-                if (($item['InstanceId'] ?? '') === $account['instance_id']) {
+                if (($item['InstanceId'] ?? '') === $account->instanceId) {
                     return $item['Status'];
                 }
             }
 
-            throw new \Exception("API 响应未找到匹配的实例状态 (ID: {$account['instance_id']})");
+            throw new \Exception("API 响应未找到匹配的实例状态 (ID: {$account->instanceId})");
         }, 'getInstanceStatus');
     }
 
@@ -309,14 +309,14 @@ class AliyunService
     public function getInstanceFullStatus($account)
     {
         return RetryHandler::execute(function () use ($account) {
-            AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
-                ->regionId($account['region_id'])
+            AlibabaCloud::accessKeyClient($account->accessKeyId, $account->accessKeySecret)
+                ->regionId($account->regionId)
                 ->asDefaultClient();
 
             $options = [
                 'query' => [
-                    'RegionId' => $account['region_id'],
-                    'InstanceId.1' => $account['instance_id']
+                    'RegionId' => $account->regionId,
+                    'InstanceId.1' => $account->instanceId
                 ],
                 'connect_timeout' => 10.0,
                 'timeout' => 20.0
@@ -328,15 +328,15 @@ class AliyunService
                 ->version('2014-05-26')
                 ->action('DescribeInstancesFullStatus')
                 ->method('POST')
-                ->host("ecs.{$account['region_id']}.aliyuncs.com")
+                ->host("ecs.{$account->regionId}.aliyuncs.com")
                 ->options($options)
                 ->request();
 
             $statusSet = $result['InstanceFullStatusSet']['InstanceFullStatus'][0] ?? null;
-            if ($statusSet && ($statusSet['InstanceId'] ?? '') === $account['instance_id']) {
+            if ($statusSet && ($statusSet['InstanceId'] ?? '') === $account->instanceId) {
                 return [
-                    'status' => $statusSet['Status']['Name'] ?? 'Unknown',
-                    'healthStatus' => $statusSet['HealthStatus']['Name'] ?? 'Unknown',
+                    'status' => $statusSet['Status']['Name'] ?? InstanceStatus::Unknown->value,
+                    'healthStatus' => $statusSet['HealthStatus']['Name'] ?? InstanceStatus::Unknown->value,
                 ];
             }
 
@@ -350,14 +350,14 @@ class AliyunService
      */
     public function deleteInstance($account, $forceStop = false)
     {
-        if (empty($account['instance_id'])) {
+        if (empty($account->instanceId)) {
             throw new \Exception("未配置 Instance ID");
         }
 
         try {
             return RetryHandler::execute(function () use ($account) {
-                AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
-                    ->regionId($account['region_id'])
+                AlibabaCloud::accessKeyClient($account->accessKeyId, $account->accessKeySecret)
+                    ->regionId($account->regionId)
                     ->asDefaultClient();
 
                 AlibabaCloud::rpc()
@@ -366,11 +366,11 @@ class AliyunService
                     ->version('2014-05-26')
                     ->action('DeleteInstance')
                     ->method('POST')
-                    ->host("ecs.{$account['region_id']}.aliyuncs.com")
+                    ->host("ecs.{$account->regionId}.aliyuncs.com")
                     ->options([
                         'query' => [
-                            'RegionId' => $account['region_id'],
-                            'InstanceId' => $account['instance_id'],
+                            'RegionId' => $account->regionId,
+                            'InstanceId' => $account->instanceId,
                             'Force' => true,
                         ],
                         'connect_timeout' => 10.0,
@@ -393,27 +393,27 @@ class AliyunService
      * 控制实例开关机
      * @throws \Exception
      */
-    public function controlInstance($account, InstanceAction $action, $shutdownMode = 'KeepCharging')
+    public function controlInstance($account, string $action, $shutdownMode = 'KeepCharging')
     {
         return RetryHandler::execute(function () use ($account, $action, $shutdownMode) {
-            AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
-                ->regionId($account['region_id'])
+            AlibabaCloud::accessKeyClient($account->accessKeyId, $account->accessKeySecret)
+                ->regionId($account->regionId)
                 ->asDefaultClient();
 
-            if (empty($account['instance_id'])) {
+            if (empty($account->instanceId)) {
                 throw new \Exception("未配置 Instance ID");
             }
 
             $options = [
                 'query' => [
-                    'RegionId' => $account['region_id'],
-                    'InstanceId' => $account['instance_id']
+                    'RegionId' => $account->regionId,
+                    'InstanceId' => $account->instanceId
                 ],
                 'connect_timeout' => 10.0,
                 'timeout' => 20.0
             ];
 
-            if ($action === InstanceAction::Stop) {
+            if ($action === 'stop') {
                 $options['query']['StoppedMode'] = $shutdownMode;
             }
 
@@ -421,9 +421,9 @@ class AliyunService
                 ->product('Ecs')
                 ->scheme('https')
                 ->version('2014-05-26')
-                ->action($action === InstanceAction::Stop ? 'StopInstance' : 'StartInstance')
+                ->action($action === 'stop' ? 'StopInstance' : 'StartInstance')
                 ->method('POST')
-                ->host("ecs.{$account['region_id']}.aliyuncs.com")
+                ->host("ecs.{$account->regionId}.aliyuncs.com")
                 ->options($options)
                 ->request();
 
@@ -523,7 +523,7 @@ class AliyunService
                         $instances[] = [
                             'instanceId' => $instance['InstanceId'] ?? '',
                             'instanceName' => $instance['InstanceName'] ?? '',
-                            'status' => $instance['Status'] ?? 'Unknown',
+                            'status' => $instance['Status'] ?? InstanceStatus::Unknown->value,
                             'regionId' => $region['regionId'],
                             'regionName' => $region['localName'],
                             'instanceType' => $instance['InstanceType'] ?? '',
@@ -593,15 +593,15 @@ class AliyunService
 
     public function releaseManagedEip($account)
     {
-        $allocationId = trim((string) ($account['eip_allocation_id'] ?? ''));
-        if (($account['public_ip_mode'] ?? '') !== 'eip' || empty($account['eip_managed']) || $allocationId === '') {
+        $allocationId = trim((string) ($account->eipAllocationId ?? ''));
+        if (($account->publicIpMode ?? '') !== 'eip' || empty($account->eipManaged) || $allocationId === '') {
             return false;
         }
 
-        $key = $account['access_key_id'];
-        $secret = $account['access_key_secret'];
-        $regionId = $account['region_id'];
-        $this->unassociateEipAddress($key, $secret, $regionId, $allocationId, $account['instance_id'] ?? '');
+        $key = $account->accessKeyId;
+        $secret = $account->accessKeySecret;
+        $regionId = $account->regionId;
+        $this->unassociateEipAddress($key, $secret, $regionId, $allocationId, $account->instanceId ?? '');
         $this->waitEipStatus($key, $secret, $regionId, $allocationId, 'Available', 8);
         $this->releaseEipAddress($key, $secret, $regionId, $allocationId);
         return true;
@@ -609,18 +609,18 @@ class AliyunService
 
     public function replaceManagedEip($account)
     {
-        $oldAllocationId = trim((string) ($account['eip_allocation_id'] ?? ''));
-        if (($account['public_ip_mode'] ?? '') !== 'eip' || empty($account['eip_managed']) || $oldAllocationId === '') {
+        $oldAllocationId = trim((string) ($account->eipAllocationId ?? ''));
+        if (($account->publicIpMode ?? '') !== 'eip' || empty($account->eipManaged) || $oldAllocationId === '') {
             throw new \Exception('当前实例不是系统托管 EIP，无法更换公网 IP');
         }
 
-        $key = $account['access_key_id'];
-        $secret = $account['access_key_secret'];
-        $regionId = $account['region_id'];
-        $instanceId = $account['instance_id'] ?? '';
-        $bandwidth = max(1, (int) ($account['internet_max_bandwidth_out'] ?? 100));
+        $key = $account->accessKeyId;
+        $secret = $account->accessKeySecret;
+        $regionId = $account->regionId;
+        $instanceId = $account->instanceId ?? '';
+        $bandwidth = max(1, (int) ($account->internetMaxBandwidthOut ?? 100));
 
-        $newEip = $this->allocateEipAddress($key, $secret, $regionId, $bandwidth, ($account['instance_name'] ?? $instanceId) . '-replace');
+        $newEip = $this->allocateEipAddress($key, $secret, $regionId, $bandwidth, ($account->instanceName ?? $instanceId) . '-replace');
 
         try {
             $this->unassociateEipAddress($key, $secret, $regionId, $oldAllocationId, $instanceId);

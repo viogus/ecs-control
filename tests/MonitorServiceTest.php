@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/../src/Helpers.php';
 require_once __DIR__ . '/../src/MonitorService.php';
+require_once __DIR__ . '/../src/Account.php';
+require_once __DIR__ . '/../src/InstanceStatus.php';
 
 final class FakeMonitorDb
 {
@@ -93,14 +95,14 @@ function assert_same_monitor($expected, $actual, string $message): void
     }
 }
 
-function invoke_monitor_keep_alive(MonitorService $service, array $account, int $currentTime, bool $keepAlive, array &$state): void
+function invoke_monitor_keep_alive(MonitorService $service, Account $account, int $currentTime, bool $keepAlive, array &$state): void
 {
     $method = new ReflectionMethod(MonitorService::class, 'handleKeepAlive');
     $method->setAccessible(true);
     $method->invokeArgs($service, [$account, $currentTime, $keepAlive, &$state]);
 }
 
-function invoke_monitor_cost_breaker(MonitorService $service, array $account, int $currentTime, string $shutdownMode, array &$state): bool
+function invoke_monitor_cost_breaker(MonitorService $service, Account $account, int $currentTime, string $shutdownMode, array &$state): bool
 {
     $method = new ReflectionMethod(MonitorService::class, 'handleCostCircuitBreaker');
     $method->setAccessible(true);
@@ -115,14 +117,14 @@ function test_keep_alive_skips_when_schedule_is_blocked_by_protection(): void
     $ddns = new FakeMonitorDdns();
     $service = new MonitorService($db, new FakeMonitorConfig(), $aliyun, $notification, $ddns);
 
-    $account = [
+    $account = Account::fromDbRow([
         'id' => 1,
         'access_key_id' => 'AKID1234567890',
         'region_id' => 'eu-central-1',
         'instance_id' => 'i-1',
         'instance_status' => 'Stopped',
         'auto_start_blocked' => 0,
-    ];
+    ]);
     $state = [
         'accountLabel' => 'prod',
         'status' => 'Stopped',
@@ -155,13 +157,13 @@ function test_cost_query_failure_is_cooled_down_for_five_minutes(): void
         new FakeMonitorDdns(),
         $bss
     );
-    $account = [
+    $account = Account::fromDbRow([
         'id' => 1,
         'access_key_id' => 'AKID1234567890',
         'access_key_secret' => 'secret',
         'instance_id' => 'i-1',
         'site_type' => 'international',
-    ];
+    ]);
     $state = [
         'accountLabel' => 'prod',
         'status' => 'Running',

@@ -259,7 +259,7 @@ class HttpRouter
 
         $data = $this->request->getJsonBody();
         try {
-            if ($this->app->setup($data)) {
+            if ($this->app->getAuthManager()->setup($data)) {
                 $_SESSION['is_admin'] = true;
                 $this->ensureCsrfToken();
                 $this->json(['success' => true]);
@@ -275,7 +275,7 @@ class HttpRouter
     {
         $data = $this->request->getJsonBody();
         try {
-            if ($this->app->login($data['password'] ?? '', $this->request->getClientIp())) {
+            if ($this->app->getAuthManager()->login($data['password'] ?? '', $this->request->getClientIp())) {
                 session_regenerate_id(true);
                 $_SESSION['is_admin'] = true;
                 $this->ensureCsrfToken();
@@ -338,13 +338,13 @@ class HttpRouter
             return;
         }
 
-        $this->json($this->app->getStatusForFrontend(true), 200, 0, true);
+        $this->json($this->app->getResponseBuilder()->getStatusForFrontend(true), 200, 0, true);
     }
 
     private function handleExport(): void
     {
         try {
-            $this->json($this->app->exportForMigration(), 200, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT, true);
+            $this->json($this->app->getExportService()->export(), 200, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT, true);
         } catch (Exception $e) {
             $this->json(['success' => false, 'message' => $e->getMessage()], 400, 0, true);
         }
@@ -353,7 +353,7 @@ class HttpRouter
     private function handleGetConfig(): void
     {
         $this->ensureCsrfToken();
-        $config = $this->app->getConfigForFrontend();
+        $config = $this->app->getResponseBuilder()->getConfigForFrontend();
         $config['csrf_token'] = $_SESSION['csrf_token'];
         $this->json($config);
     }
@@ -361,7 +361,9 @@ class HttpRouter
     private function handleSaveConfig(): void
     {
         $data = $this->request->getJsonBody();
-        if ($this->app->updateConfig($data)) {
+        $success = $this->app->getConfigManager()->updateConfig($data);
+        if ($success) {
+            $this->app->getNotificationService()->setConfig($this->app->getConfigManager()->getAllSettings());
             $this->json(['success' => true]);
         } else {
             $this->json(['success' => false, 'message' => '保存失败']);
@@ -370,27 +372,27 @@ class HttpRouter
 
     private function handleUploadLogo(): void
     {
-        $this->json($this->app->uploadLogo($this->request->getFile('logo') ?? []), 200, 0, true);
+        $this->json($this->app->getAdminSupportService()->uploadLogo($this->request->getFile('logo') ?? []), 200, 0, true);
     }
 
     private function handleSendTestEmail(): void
     {
         $data = $this->request->getJsonBody();
-        $result = $this->app->sendTestEmail($data['email'] ?? '');
+        $result = $this->app->getAdminSupportService()->sendTestEmail($data['email'] ?? '');
         $this->json(['success' => $result === true, 'message' => $result]);
     }
 
     private function handleSendTestTelegram(): void
     {
         $data = $this->request->getJsonBody();
-        $result = $this->app->sendTestTelegram($data['telegram'] ?? []);
+        $result = $this->app->getAdminSupportService()->sendTestTelegram($data['telegram'] ?? []);
         $this->json(['success' => $result === true, 'message' => $result]);
     }
 
     private function handleSendTestWebhook(): void
     {
         $data = $this->request->getJsonBody();
-        $result = $this->app->sendTestWebhook($data['webhook'] ?? []);
+        $result = $this->app->getAdminSupportService()->sendTestWebhook($data['webhook'] ?? []);
         $this->json(['success' => $result === true, 'message' => $result]);
     }
 
@@ -398,7 +400,7 @@ class HttpRouter
     {
         $data = $this->request->getJsonBody();
         $id = $data['id'] ?? 0;
-        $result = $this->app->refreshAccount($id);
+        $result = $this->app->getInstanceActionService()->refreshAccount($id);
         if ($result === false) {
             $this->json(['success' => false, 'message' => '刷新失败']);
         } elseif (is_array($result)) {
@@ -413,7 +415,7 @@ class HttpRouter
         $data = $this->request->getJsonBody();
 
         try {
-            $instances = $this->app->fetchInstances($data['accessKeyId'] ?? '', $data['accessKeySecret'] ?? '', $data['regionId'] ?? '');
+            $instances = $this->app->getAccountGroupOperationService()->fetchInstances($data['accessKeyId'] ?? '', $data['accessKeySecret'] ?? '', $data['regionId'] ?? '');
             $this->json(['success' => true, 'data' => $instances], 200, 0, true);
         } catch (Exception $e) {
             $this->json(['success' => false, 'message' => $e->getMessage()], 400, 0, true);
@@ -425,7 +427,7 @@ class HttpRouter
         $data = $this->request->getJsonBody();
 
         try {
-            $this->json($this->app->testAccountCredentials($data['account'] ?? []), 200, 0, true);
+            $this->json($this->app->getAccountGroupOperationService()->testAccountCredentials($data['account'] ?? []), 200, 0, true);
         } catch (Exception $e) {
             $this->json([
                 'success' => false,
@@ -439,7 +441,7 @@ class HttpRouter
         $data = $this->request->getJsonBody();
 
         try {
-            $this->json($this->app->syncAccountGroup($data['groupKey'] ?? ''), 200, 0, true);
+            $this->json($this->app->getAccountGroupOperationService()->syncAccountGroup($data['groupKey'] ?? ''), 200, 0, true);
         } catch (Exception $e) {
             $this->json([
                 'success' => false,
@@ -453,7 +455,7 @@ class HttpRouter
         $data = $this->request->getJsonBody();
 
         try {
-            $this->json($this->app->restoreScheduleAfterTrafficBlock($data['groupKey'] ?? ''), 200, 0, true);
+            $this->json($this->app->getAccountGroupOperationService()->restoreScheduleAfterTrafficBlock($data['groupKey'] ?? ''), 200, 0, true);
         } catch (Exception $e) {
             $this->json([
                 'success' => false,
@@ -467,7 +469,7 @@ class HttpRouter
         $data = $this->request->getJsonBody();
 
         try {
-            $result = $this->app->previewEcsCreate($data);
+            $result = $this->app->getEcsCreateService()->previewEcsCreate($data);
             $_SESSION['ecs_create_previews'] = $_SESSION['ecs_create_previews'] ?? [];
             $_SESSION['ecs_create_previews'][$result['previewId']] = [
                 'summary' => $result['summary'],
@@ -484,7 +486,7 @@ class HttpRouter
         $data = $this->request->getJsonBody();
 
         try {
-            $this->json($this->app->getEcsDiskOptions($data), 200, 0, true);
+            $this->json($this->app->getEcsCreateService()->getEcsDiskOptions($data), 200, 0, true);
         } catch (Exception $e) {
             $this->json(['success' => false, 'message' => $e->getMessage()], 400, 0, true);
         }
@@ -505,7 +507,7 @@ class HttpRouter
                 throw new Exception('配置清单已过期，请重新预检');
             }
 
-            $result = $this->app->createEcsFromPreview($previewId, $previewStore['summary']);
+            $result = $this->app->getEcsCreateService()->createEcsFromPreview($previewId, $previewStore['summary']);
             unset($_SESSION['ecs_create_previews'][$previewId]);
             $this->json($result, 200, 0, true);
         } catch (Exception $e) {
@@ -516,7 +518,7 @@ class HttpRouter
     private function handleGetEcsCreateTask(): void
     {
         $taskId = $this->request->getQueryParam('taskId', '');
-        $task = $this->app->getEcsCreateTask($taskId);
+        $task = $this->app->getEcsCreateService()->getEcsCreateTask($taskId);
         if (!$task) {
             $this->json(['success' => false, 'message' => '任务不存在'], 404, 0, true);
             return;
@@ -529,14 +531,14 @@ class HttpRouter
     private function handleGetLogs(): void
     {
         $tab = $this->request->getQueryParam('tab', 'action');
-        $this->json(['data' => $this->app->getSystemLogs($tab)], 200, 0, true);
+        $this->json(['data' => $this->app->getAdminSupportService()->getSystemLogs($tab)], 200, 0, true);
     }
 
     private function handleClearLogs(): void
     {
         $data = $this->request->getJsonBody();
         $tab = $data['tab'] ?? 'action';
-        if ($this->app->clearSystemLogs($tab)) {
+        if ($this->app->getAdminSupportService()->clearSystemLogs($tab)) {
             $this->json(['success' => true]);
         } else {
             $this->json(['success' => false, 'message' => '清空失败']);
@@ -546,7 +548,7 @@ class HttpRouter
     private function handleGetHistory(): void
     {
         $id = $this->request->getQueryParam('id', 0);
-        $this->json(['data' => $this->app->getAccountHistory($id)], 200, 0, true);
+        $this->json(['data' => $this->app->getAdminSupportService()->getAccountHistory($id)], 200, 0, true);
     }
 
     private function handleLogout(): void
@@ -559,7 +561,7 @@ class HttpRouter
     {
         $input = $this->request->getJsonBody();
         $sync = ($input['sync'] ?? false) === true;
-        $this->json(['data' => $this->app->getAllManagedInstances($sync)], 200, 0, true);
+        $this->json(['data' => $this->app->getInstanceActionService()->getAllManagedInstances($sync, [$this->app->getResponseBuilder(), 'buildInstanceSnapshot'])], 200, 0, true);
     }
 
     private function handleControlInstance(): void
@@ -569,13 +571,25 @@ class HttpRouter
         $actionType = $data['action'] ?? '';
         $shutdownMode = $data['shutdownMode'] ?? 'KeepCharging';
 
-        $action = InstanceAction::tryFrom($actionType);
+        $action = in_array($actionType, ['start', 'stop', 'delete'], true) ? $actionType : null;
         if ($action === null) {
             $this->json(['success' => false, 'message' => '无效的操作类型'], 400);
             return;
         }
 
-        $result = $this->app->controlInstanceAction($accountId, $action, $shutdownMode);
+        $result = $this->app->getInstanceActionService()->controlInstance($accountId, $action, $shutdownMode, true, function($account, $fromStatus, $toStatus, $reason = '') {
+            $fromStatus = InstanceStatus::tryFrom((string) ($fromStatus ?: 'Unknown')) ?? InstanceStatus::Unknown;
+            $toStatus = InstanceStatus::tryFrom((string) ($toStatus ?: 'Unknown')) ?? InstanceStatus::Unknown;
+            if ($fromStatus === $toStatus || !in_array($toStatus, [InstanceStatus::Running, InstanceStatus::Stopped], true)) return;
+            if ($fromStatus === InstanceStatus::Unknown) return;
+            $accountLabel = Helpers::getAccountLogLabel($account);
+            $res = $this->app->getNotificationService()->notifyInstanceStatusChanged($accountLabel, $account, $fromStatus->value, $toStatus->value, $reason);
+            if ($res === true) {
+                $this->app->getDb()->addLog('info', "通知推送成功 [$accountLabel]");
+            } elseif ($res !== false && $res !== true) {
+                $this->app->getDb()->addLog('warning', "通知推送异常/失败 [$accountLabel]: " . strip_tags($res));
+            }
+        });
         $this->json(['success' => $result]);
     }
 
@@ -585,7 +599,7 @@ class HttpRouter
         $accountId = $data['accountId'] ?? 0;
         $forceStop = $data['forceStop'] ?? false;
 
-        $result = $this->app->deleteInstanceAction($accountId, $forceStop);
+        $result = $this->app->getInstanceActionService()->deleteInstance($accountId, $forceStop);
         $this->json(['success' => $result]);
     }
 
@@ -594,6 +608,6 @@ class HttpRouter
         $data = $this->request->getJsonBody();
         $accountId = $data['accountId'] ?? 0;
 
-        $this->json($this->app->replaceInstanceIpAction($accountId));
+        $this->json($this->app->getInstanceActionService()->replaceInstanceIp($accountId));
     }
 }

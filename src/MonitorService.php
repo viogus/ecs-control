@@ -82,7 +82,7 @@ class MonitorService
 
     private function isRecentlyCreatedInstance($account)
     {
-        $instanceId = trim((string) ($account['instance_id'] ?? ''));
+        $instanceId = trim((string) ($account->instanceId ?? ''));
         if ($instanceId === '') {
             return false;
         }
@@ -142,7 +142,7 @@ class MonitorService
     private function getGroupTrafficUsed($account)
     {
         $pdo = $this->db->getPdo();
-        $groupKey = trim((string) ($account['group_key'] ?? ''));
+        $groupKey = trim((string) ($account->groupKey ?? ''));
         $billingMonth = date('Y-m');
 
         if ($groupKey !== '') {
@@ -152,19 +152,19 @@ class MonitorService
         }
 
         $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE access_key_id = ? AND region_id = ? AND traffic_billing_month = ? ORDER BY id ASC LIMIT 1");
-        $stmt->execute([$account['access_key_id'] ?? '', $account['region_id'] ?? '', $billingMonth]);
+        $stmt->execute([$account->accessKeyId ?? '', $account->regionId ?? '', $billingMonth]);
         return (float) $stmt->fetchColumn();
     }
 
     private function getMeteredOutboundTraffic($account)
     {
-        if (empty($account['id']) || empty($account['instance_id'])) {
+        if (empty($account->id) || empty($account->instanceId)) {
             throw new Exception('缺少账号 ID 或 Instance ID，无法按实例统计公网出口流量');
         }
 
         $billingMonth = date('Y-m');
         $monthStartMs = strtotime($billingMonth . '-01 00:00:00') * 1000;
-        $record = $this->db->getInstanceTrafficUsage($account['id'], $account['instance_id'], $billingMonth);
+        $record = $this->db->getInstanceTrafficUsage($account->id, $account->instanceId, $billingMonth);
 
         $trafficBytes = $record ? (float) ($record['traffic_bytes'] ?? 0) : 0.0;
         $lastSampleMs = $record ? (int) ($record['last_sample_ms'] ?? 0) : 0;
@@ -183,8 +183,8 @@ class MonitorService
         }
 
         $this->db->upsertInstanceTrafficUsage(
-            (int) $account['id'],
-            $account['instance_id'],
+            (int) $account->id,
+            $account->instanceId,
             $billingMonth,
             $trafficBytes,
             $lastSampleMs
@@ -199,11 +199,11 @@ class MonitorService
             return $this->aliyunService->getInstanceStatus($account);
         } catch (\Exception $e) {
             $this->db->addLog('warning', "实例状态查询失败 [" . Helpers::getAccountLogLabel($account) . "]: " . strip_tags($e->getMessage()));
-            return 'Unknown';
+            return InstanceStatus::Unknown->value;
         }
     }
 
-    private function safeControlInstance($account, InstanceAction $action, $shutdownMode = 'KeepCharging')
+    private function safeControlInstance($account, string $action, $shutdownMode = 'KeepCharging')
     {
         try {
             return $this->aliyunService->controlInstance($account, $action, $shutdownMode);
@@ -227,15 +227,15 @@ class MonitorService
         $s = [
             'accountLabel' => $accountLabel,
             'logPrefix' => "[{$accountLabel}]",
-            'accountGroupKey' => $account['group_key'] ?: substr(sha1(($account['access_key_id'] ?? '') . '|' . ($account['region_id'] ?? '')), 0, 16),
+            'accountGroupKey' => $account->groupKey ?: substr(sha1(($account->accessKeyId ?? '') . '|' . ($account->regionId ?? '')), 0, 16),
             'actions' => [],
-            'status' => $account['instance_status'] ?? 'Unknown',
+            'status' => $account->instanceStatus ?? InstanceStatus::Unknown->value,
             'traffic' => 0.0,
             'apiStatusLog' => '',
-            'scheduleBlockedByTraffic' => !empty($account['schedule_blocked_by_traffic']),
-            'protectionSuspended' => !empty($account['protection_suspended']),
-            'protectionSuspendReason' => trim((string) ($account['protection_suspend_reason'] ?? '')),
-            'protectionSuspendNotifiedAt' => (int) ($account['protection_suspend_notified_at'] ?? 0),
+            'scheduleBlockedByTraffic' => !empty($account->scheduleBlockedByTraffic),
+            'protectionSuspended' => !empty($account->protectionSuspended),
+            'protectionSuspendReason' => trim((string) ($account->protectionSuspendReason ?? '')),
+            'protectionSuspendNotifiedAt' => (int) ($account->protectionSuspendNotifiedAt ?? 0),
         ];
 
         // 1. 自适应心跳
@@ -270,8 +270,8 @@ class MonitorService
 
     private function handleAdaptiveHeartbeat($account, int $currentTime, int $userInterval, array &$s): void
     {
-        $lastUpdate = $account['updated_at'] ?? 0;
-        $cachedStatus = InstanceStatus::tryFrom($account['instance_status'] ?? 'Unknown') ?? InstanceStatus::Unknown;
+        $lastUpdate = $account->updatedAt ?? 0;
+        $cachedStatus = InstanceStatus::tryFrom($account->instanceStatus ?? InstanceStatus::Unknown->value) ?? InstanceStatus::Unknown;
         $isTransientState = $cachedStatus->isTransient();
         $currentInterval = $isTransientState ? 60 : $userInterval;
 
@@ -286,7 +286,7 @@ class MonitorService
             $trafficResult = $this->safeGetTraffic($account);
             $status = $this->safeGetInstanceStatus($account);
 
-            if ($status === 'Unknown') {
+            if ($status === InstanceStatus::Unknown->value) {
                 usleep(500000);
                 $status = $this->safeGetInstanceStatus($account);
             }
@@ -314,14 +314,14 @@ class MonitorService
             }
 
             if (empty($trafficResult['success'])) {
-                $s['traffic'] = $account['traffic_used'];
+                $s['traffic'] = $account->trafficUsed;
                 $s['apiStatusLog'] = "流量接口异常";
                 $newUpdateTime = $lastUpdate;
             } else {
                 $s['traffic'] = (float) ($trafficResult['value'] ?? 0);
                 $s['apiStatusLog'] = "已更新";
-                $this->db->addHourlyStat($account['id'], $s['traffic']);
-                $this->db->addDailyStat($account['id'], $s['traffic']);
+                $this->db->addHourlyStat($account->id, $s['traffic']);
+                $this->db->addDailyStat($account->id, $s['traffic']);
             }
 
             $statusEnum = InstanceStatus::tryFrom($status) ?? InstanceStatus::Unknown;
@@ -334,11 +334,11 @@ class MonitorService
             }
 
             $this->notifyStatusChangeIfNeeded($account, $cachedStatus->value, $status, '系统同步检测到实例状态变化。');
-            $this->configManager->updateAccountStatus($account['id'], $s['traffic'], $status, $newUpdateTime, $metadata);
+            $this->configManager->updateAccountStatus($account->id, $s['traffic'], $status, $newUpdateTime, $metadata);
             $s['status'] = $status;
         } else {
-            $s['traffic'] = $account['traffic_used'];
-            $s['status'] = $account['instance_status'];
+            $s['traffic'] = $account->trafficUsed;
+            $s['status'] = $account->instanceStatus;
             $timeLeft = $currentInterval - ($currentTime - $lastUpdate);
             $s['apiStatusLog'] = "缓存({$timeLeft}s)";
         }
@@ -348,7 +348,7 @@ class MonitorService
 
     private function handleTrafficCircuitBreaker($account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, array &$s): bool
     {
-        $maxTraffic = $account['max_traffic'];
+        $maxTraffic = $account->maxTraffic;
         $accountTraffic = $this->getGroupTrafficUsed($account);
         $usagePercent = ($maxTraffic > 0) ? round(($accountTraffic / $maxTraffic) * 100, 2) : 0;
         $isOverThreshold = $usagePercent >= $threshold;
@@ -367,11 +367,11 @@ class MonitorService
             if ($s['protectionSuspended'] && $s['protectionSuspendReason'] === 'credential_invalid') {
                 if ($s['protectionSuspendNotifiedAt'] <= 0) {
                     $s['actions'][] = "账号密钥失效，已暂停自动停机";
-                    $notifyResult = $this->notificationService->notifyCredentialInvalid($account['access_key_id'], $accountTraffic, $usagePercent, $threshold);
+                    $notifyResult = $this->notificationService->notifyCredentialInvalid($account->accessKeyId, $accountTraffic, $usagePercent, $threshold);
                     Helpers::logNotificationResult($this->db, $notifyResult, $s['accountLabel']);
                     $this->db->addLog('warning', "检测到账号鉴权失效，已暂停自动停机保护 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
                     $s['protectionSuspendNotifiedAt'] = $currentTime;
-                    $this->configManager->updateAccountStatus($account['id'], $s['traffic'], $s['status'], $account['updated_at'] ?? 0, [
+                    $this->configManager->updateAccountStatus($account->id, $s['traffic'], $s['status'], $account->updatedAt ?? 0, [
                         'protection_suspended' => 1, 'protection_suspend_reason' => 'credential_invalid',
                         'protection_suspend_notified_at' => $s['protectionSuspendNotifiedAt']
                     ]);
@@ -381,11 +381,11 @@ class MonitorService
             } else {
                 $canAttemptStop = !in_array($s['status'], [InstanceStatus::Stopped->value, InstanceStatus::Stopping->value, InstanceStatus::Released->value], true);
                 if ($canAttemptStop) {
-                    if ($this->safeControlInstance($account, InstanceAction::Stop, $shutdownMode)) {
+                    if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
                         $previousStatus = $s['status'];
                         $s['actions'][] = $isHardLimitExceeded ? "已超量自动停机" : "接近上限自动停机";
                         $this->db->addLog('warning', "账号出口流量达到保护线，已自动停机 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
-                        $this->configManager->updateAccountStatus($account['id'], $s['traffic'], InstanceStatus::Stopping->value, $currentTime);
+                        $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Stopping->value, $currentTime);
                         $this->configManager->updateScheduleBlockedByTrafficForGroup($s['accountGroupKey'], true);
                         $this->notifyStatusChangeIfNeeded($account, $previousStatus, InstanceStatus::Stopping->value, '流量达到保护线，已自动停机。');
                         $s['status'] = InstanceStatus::Stopping->value;
@@ -398,14 +398,14 @@ class MonitorService
             }
 
             if (!empty($s['actions']) && !($s['protectionSuspended'] && $s['protectionSuspendReason'] === 'credential_invalid')) {
-                $mailRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $accountTraffic, $usagePercent, implode(',', $s['actions']), $threshold);
+                $mailRes = $this->notificationService->sendTrafficWarning($account->accessKeyId, $accountTraffic, $usagePercent, implode(',', $s['actions']), $threshold);
                 Helpers::logNotificationResult($this->db, $mailRes, $s['accountLabel']);
             }
         } else {
             // notify_only mode — always dispatch notification
             $s['actions'][] = "超量提醒";
             $this->db->addLog('warning', "账号出口流量超限触发提醒 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
-            $mailRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $accountTraffic, $usagePercent, '超量提醒', $threshold);
+            $mailRes = $this->notificationService->sendTrafficWarning($account->accessKeyId, $accountTraffic, $usagePercent, '超量提醒', $threshold);
             Helpers::logNotificationResult($this->db, $mailRes, $s['accountLabel']);
         }
 
@@ -429,8 +429,8 @@ class MonitorService
 
         try {
             $bill = $this->bssService->getInstanceBill(
-                $account['access_key_id'], $account['access_key_secret'],
-                $account['instance_id'], date('Y-m'), $account['site_type'] ?? 'china'
+                $account->accessKeyId, $account->accessKeySecret,
+                $account->instanceId, date('Y-m'), $account->siteType ?? 'china'
             );
             $cost = (float) ($bill['TotalCost'] ?? 0);
             $this->clearCostQueryFailureCooldown($account);
@@ -442,14 +442,14 @@ class MonitorService
 
         if ($cost >= $threshold) {
             $previousStatus = $s['status'];
-            if ($this->safeControlInstance($account, InstanceAction::Stop, $shutdownMode)) {
+            if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
                 $s['actions'][] = "费用超限自动停机";
                 $this->db->addLog('warning', "当月费用 \${$cost} 超过阈值 \${$threshold}，已自动停机 [{$s['accountLabel']}]");
-                $this->configManager->updateAccountStatus($account['id'], $s['traffic'], InstanceStatus::Stopping->value, $currentTime);
-                $this->configManager->updateAutoStartBlocked($account['id'], true);
+                $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Stopping->value, $currentTime);
+                $this->configManager->updateAutoStartBlocked($account->id, true);
                 $this->configManager->updateScheduleBlockedByTrafficForGroup($s['accountGroupKey'], true);
                 $this->notifyStatusChangeIfNeeded($account, $previousStatus, InstanceStatus::Stopping->value, "当月费用 \${$cost} 超过阈值，已自动停机。");
-                $notifyRes = $this->notificationService->sendTrafficWarning($account['access_key_id'], $cost, ($cost / $threshold) * 100, '费用超限自动停机', (int) $threshold);
+                $notifyRes = $this->notificationService->sendTrafficWarning($account->accessKeyId, $cost, ($cost / $threshold) * 100, '费用超限自动停机', (int) $threshold);
                 Helpers::logNotificationResult($this->db, $notifyRes, $s['accountLabel']);
                 $s['status'] = InstanceStatus::Stopping->value;
                 $s['scheduleBlockedByTraffic'] = true;
@@ -464,12 +464,12 @@ class MonitorService
 
     private function costQueryFailureCooldownKey($account): string
     {
-        $accountId = (int) ($account['id'] ?? 0);
+        $accountId = (int) ($account->id ?? 0);
         if ($accountId > 0) {
             return "cost_query_failure_until_{$accountId}";
         }
 
-        return 'cost_query_failure_until_' . md5(($account['access_key_id'] ?? '') . '|' . ($account['instance_id'] ?? ''));
+        return 'cost_query_failure_until_' . md5(($account->accessKeyId ?? '') . '|' . ($account->instanceId ?? ''));
     }
 
     private function isCostQueryInCooldown($account, int $currentTime): bool
@@ -497,25 +497,25 @@ class MonitorService
 
     private function handleScheduledOps($account, int $currentTime, string $shutdownMode, array &$s): void
     {
-        $scheduleEnabled = !empty($account['schedule_enabled']);
-        $scheduleStartEnabled = !empty($account['schedule_start_enabled']);
-        $scheduleStopEnabled = !empty($account['schedule_stop_enabled']);
-        $startTime = trim((string) ($account['start_time'] ?? ''));
-        $stopTime = trim((string) ($account['stop_time'] ?? ''));
+        $scheduleEnabled = !empty($account->scheduleEnabled);
+        $scheduleStartEnabled = !empty($account->scheduleStartEnabled);
+        $scheduleStopEnabled = !empty($account->scheduleStopEnabled);
+        $startTime = trim((string) ($account->startTime ?? ''));
+        $stopTime = trim((string) ($account->stopTime ?? ''));
         $today = date('Y-m-d', $currentTime);
 
         $scheduleAllowed = $scheduleEnabled && !$s['scheduleBlockedByTraffic'] && !($s['requiresTrafficProtection'] ?? false);
         $isStableState = !in_array($s['status'], [InstanceStatus::Starting->value, InstanceStatus::Stopping->value, InstanceStatus::Pending->value, InstanceStatus::Releasing->value, InstanceStatus::Released->value], true);
 
         // 定时停机
-        if ($scheduleAllowed && $scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account['schedule_last_stop_date'] ?? '')) {
+        if ($scheduleAllowed && $scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account->scheduleLastStopDate ?? '')) {
             if ($isStableState && $s['status'] === InstanceStatus::Running->value) {
-                if ($this->safeControlInstance($account, InstanceAction::Stop, $shutdownMode)) {
+                if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
                     $s['actions'][] = "定时停机";
                     $this->db->addLog('info', "执行定时停机 [{$s['accountLabel']}] {$stopTime}");
-                    $this->configManager->updateAccountStatus($account['id'], $s['traffic'], InstanceStatus::Stopping->value, $currentTime);
-                    $this->configManager->updateAutoStartBlocked($account['id'], true);
-                    $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                    $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Stopping->value, $currentTime);
+                    $this->configManager->updateAutoStartBlocked($account->id, true);
+                    $this->configManager->updateScheduleExecutionState($account->id, 'stop', $today);
                     $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
                     Helpers::logNotificationResult($this->db, $scheduleNotify, $s['accountLabel']);
                     $this->notifyStatusChangeIfNeeded($account, InstanceStatus::Running->value, InstanceStatus::Stopping->value, '已按计划执行定时停机。');
@@ -524,19 +524,19 @@ class MonitorService
                     $s['apiStatusLog'] .= " [定时停机失败]";
                 }
             } else {
-                $this->configManager->updateScheduleExecutionState($account['id'], 'stop', $today);
+                $this->configManager->updateScheduleExecutionState($account->id, 'stop', $today);
             }
         }
 
         // 定时开机
-        if ($scheduleAllowed && $scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account['schedule_last_start_date'] ?? '')) {
+        if ($scheduleAllowed && $scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account->scheduleLastStartDate ?? '')) {
             if ($isStableState && $s['status'] === InstanceStatus::Stopped->value) {
-                if ($this->safeControlInstance($account, InstanceAction::Start)) {
+                if ($this->safeControlInstance($account, 'start')) {
                     $s['actions'][] = "定时开机";
                     $this->db->addLog('info', "执行定时开机 [{$s['accountLabel']}] {$startTime}");
-                    $this->configManager->updateAccountStatus($account['id'], $s['traffic'], InstanceStatus::Starting->value, $currentTime);
-                    $this->configManager->updateAutoStartBlocked($account['id'], false);
-                    $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                    $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Starting->value, $currentTime);
+                    $this->configManager->updateAutoStartBlocked($account->id, false);
+                    $this->configManager->updateScheduleExecutionState($account->id, 'start', $today);
                     $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
                     Helpers::logNotificationResult($this->db, $scheduleNotify, $s['accountLabel']);
                     $this->notifyStatusChangeIfNeeded($account, InstanceStatus::Stopped->value, InstanceStatus::Starting->value, '已按计划执行定时开机。');
@@ -546,7 +546,7 @@ class MonitorService
                     $s['apiStatusLog'] .= " [定时开机失败]";
                 }
             } else {
-                $this->configManager->updateScheduleExecutionState($account['id'], 'start', $today);
+                $this->configManager->updateScheduleExecutionState($account->id, 'start', $today);
             }
         }
     }
@@ -555,21 +555,21 @@ class MonitorService
 
     private function handleMonthlyAutoStart($account, int $currentTime, bool $monthlyAutoStart, array &$s): void
     {
-        $autoStartBlocked = !empty($account['auto_start_blocked']);
+        $autoStartBlocked = !empty($account->autoStartBlocked);
         if (!$monthlyAutoStart || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic'] || date('j', $currentTime) !== '1') {
             return;
         }
 
-        $lastMonthlyStart = (int) ($account['last_keep_alive_at'] ?? 0);
+        $lastMonthlyStart = (int) ($account->lastKeepAliveAt ?? 0);
         if ($s['status'] !== InstanceStatus::Stopped->value || $this->isSameMonth($lastMonthlyStart, $currentTime)) {
             return;
         }
 
-        if ($this->safeControlInstance($account, InstanceAction::Start)) {
+        if ($this->safeControlInstance($account, 'start')) {
             $s['actions'][] = "月初自动开机";
             $this->db->addLog('info', "执行月初自动开机 [{$s['accountLabel']}]");
-            $this->configManager->updateAccountStatus($account['id'], $s['traffic'], InstanceStatus::Starting->value, $currentTime);
-            $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
+            $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Starting->value, $currentTime);
+            $this->configManager->updateLastKeepAlive($account->id, $currentTime);
             $this->notifyStatusChangeIfNeeded($account, InstanceStatus::Stopped->value, InstanceStatus::Starting->value, '每月 1 号自动开机已执行。');
             $this->ddnsService->syncForAccounts([$account], '月初自动开机后');
             $s['status'] = InstanceStatus::Starting->value;
@@ -582,7 +582,7 @@ class MonitorService
 
     private function handleKeepAlive($account, int $currentTime, bool $keepAlive, array &$s): void
     {
-        $autoStartBlocked = !empty($account['auto_start_blocked']);
+        $autoStartBlocked = !empty($account->autoStartBlocked);
         if (!$keepAlive || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic']) {
             return;
         }
@@ -591,15 +591,15 @@ class MonitorService
             return;
         }
 
-        if ($this->safeControlInstance($account, InstanceAction::Start)) {
+        if ($this->safeControlInstance($account, 'start')) {
             $s['actions'][] = "保活启动";
             $this->db->addLog('info', "执行保活启动 [{$s['accountLabel']}]");
 
             $mailRes = $this->notificationService->notifySchedule("保活启动", $account, "检测到实例非预期关机，已尝试自动启动。");
             Helpers::logNotificationResult($this->db, $mailRes, $s['accountLabel']);
 
-            $this->configManager->updateAccountStatus($account['id'], $s['traffic'], InstanceStatus::Starting->value, $currentTime);
-            $this->configManager->updateLastKeepAlive($account['id'], $currentTime);
+            $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Starting->value, $currentTime);
+            $this->configManager->updateLastKeepAlive($account->id, $currentTime);
             $this->notifyStatusChangeIfNeeded($account, InstanceStatus::Stopped->value, InstanceStatus::Starting->value, '检测到实例非预期关机，保活已尝试自动启动。');
             $this->ddnsService->syncForAccounts([$account], '保活启动后');
             $s['status'] = InstanceStatus::Starting->value;

@@ -414,11 +414,14 @@ class ConfigManager
     public function getPendingReleaseAccounts(): array
     {
         $stmt = $this->db->query("SELECT * FROM accounts WHERE is_deleted = 1");
-        $accounts = $stmt->fetchAll();
-        foreach ($accounts as &$row) {
-            if (!empty($row['access_key_secret']) && $this->isEncryptedValue($row['access_key_secret'])) {
-                $row['access_key_secret'] = $this->decryptValue($row['access_key_secret']);
+        $rows = $stmt->fetchAll();
+        $accounts = [];
+        foreach ($rows as $row) {
+            $secret = $row['access_key_secret'] ?? '';
+            if (!empty($secret) && $this->isEncryptedValue($secret)) {
+                $secret = $this->decryptValue($secret);
             }
+            $accounts[] = Account::fromDbRow($row, $secret);
         }
         return $accounts;
     }

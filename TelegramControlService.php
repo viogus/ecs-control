@@ -224,7 +224,7 @@ class TelegramControlService
         $this->api->answerCallback($id, '正在刷新状态...');
         $accountId = (int) ($parts[2] ?? 0);
         if ($accountId > 0) {
-            $this->app->refreshAccount($accountId);
+            $this->app->getInstanceActionService()->refreshAccount($accountId);
         }
         $this->api->editMessage($chatId, $messageId, $this->buildInstanceDetailText($accountId), $this->instanceKeyboard($accountId));
     }
@@ -307,7 +307,7 @@ class TelegramControlService
 
     private function buildTrafficText()
     {
-        $config = $this->app->getConfigForFrontend();
+        $config = $this->app->getResponseBuilder()->getConfigForFrontend();
         $accounts = $config['Accounts'] ?? [];
         if (empty($accounts)) {
             return "📊 账号概览\n\n暂无账号数据，请先在控制台添加账号。";
@@ -361,8 +361,8 @@ class TelegramControlService
 
     private function refreshAllData()
     {
-        if (method_exists($this->app, 'getAllManagedInstances')) {
-            $this->app->getAllManagedInstances(true);
+        if (method_exists($this->app, 'getInstanceActionService')) {
+            $this->app->getInstanceActionService()->getAllManagedInstances(true, [$this->app->getResponseBuilder(), 'buildInstanceSnapshot']);
             $this->configManager->load();
         }
     }
@@ -493,7 +493,7 @@ class TelegramControlService
             return;
         }
 
-        $success = $this->app->controlInstanceAction($accountId, InstanceAction::Start, 'KeepCharging', false);
+        $success = $this->app->getInstanceActionService()->controlInstance($accountId, 'start', 'KeepCharging', false);
         $this->db->addLog($success ? 'info' : 'error', "Telegram 控制开机" . ($success ? '成功' : '失败') . " [{$inst['remark']}] {$inst['instanceId']}");
         $this->api->editMessage(
             $chatId,
@@ -516,7 +516,7 @@ class TelegramControlService
             return;
         }
 
-        $success = $this->app->controlInstanceAction($accountId, InstanceAction::Stop, 'KeepCharging', false);
+        $success = $this->app->getInstanceActionService()->controlInstance($accountId, 'stop', 'KeepCharging', false);
         $this->db->addLog($success ? 'info' : 'error', "Telegram 控制停机" . ($success ? '成功' : '失败') . " [{$inst['remark']}] {$inst['instanceId']}");
         $this->api->editMessage(
             $chatId,
@@ -536,7 +536,7 @@ class TelegramControlService
 
         $accountId = (int) $record['account_id'];
         $inst = $this->findInstance($accountId);
-        $success = $this->app->deleteInstanceAction($accountId);
+        $success = $this->app->getInstanceActionService()->deleteInstance($accountId, false);
         $label = $inst ? ($inst['remark'] ?: $inst['instanceId']) : ('实例 #' . $accountId);
         $this->db->addLog($success ? 'warning' : 'error', "Telegram 提交释放" . ($success ? '成功' : '失败') . " [{$label}]");
         $this->api->editMessage(
@@ -551,7 +551,7 @@ class TelegramControlService
 
     private function getInstances()
     {
-        $status = $this->app->getStatusForFrontend(true);
+        $status = $this->app->getResponseBuilder()->getStatusForFrontend(true);
         $items = $status['data'] ?? [];
         usort($items, function ($a, $b) {
             return strcmp(($a['regionName'] ?? '') . ($a['remark'] ?? ''), ($b['regionName'] ?? '') . ($b['remark'] ?? ''));

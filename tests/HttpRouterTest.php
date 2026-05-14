@@ -26,15 +26,25 @@ final class FakeRouterApp
         return ['name' => 'ECS Control'];
     }
 
+    public function getResponseBuilder()
+    {
+        return $this;
+    }
+
     public function getConfigForFrontend(): array
     {
         $this->calls[] = ['getConfigForFrontend'];
         return ['site_name' => 'demo'];
     }
 
-    public function controlInstanceAction($accountId, $action, $shutdownMode = 'KeepCharging', $waitForSync = true)
+    public function getInstanceActionService()
     {
-        $this->calls[] = ['controlInstanceAction', $accountId, $action, $shutdownMode, $waitForSync];
+        return $this;
+    }
+
+    public function controlInstance($accountId, $action, $shutdownMode = 'KeepCharging', $waitForSync = true, $callback = null)
+    {
+        $this->calls[] = ['controlInstance', $accountId, $action, $shutdownMode, $waitForSync];
         return true;
     }
 

@@ -1,7 +1,7 @@
 <?php
 // Telegram 控制常驻轮询进程。主监控 cron 继续负责流量和实例巡检。
 
-require_once 'AliyunTrafficCheck.php';
+require_once 'src/AppContainer.php';
 
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
@@ -9,7 +9,7 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
-$app = new AliyunTrafficCheck();
+$app = new AppContainer();
 $db = $app->getDb();
 $configManager = $app->getConfigManager();
 

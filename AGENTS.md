@@ -41,11 +41,11 @@ The `./data` directory is volume-mounted into `/var/www/html/data`. The Dockerfi
 ### Request Flow
 
 ```
-index.php?action=xxx  →  AliyunTrafficCheck (entry point/router)
+index.php?action=xxx  →  HttpRouter
                             ├── public interface (login, setup, check_init — no auth)
                             ├── auth gate (session check)
                             ├── CSRF gate (X-CSRF-Token header on mutating endpoints)
-                            └── delegates to services
+                            └── delegates to AppContainer services
 ```
 
 There is no `api/` directory. All routing is via `index.php?action=xxx` with a flat if/else chain. Nginx rewrites everything to `index.php`.
@@ -54,8 +54,9 @@ There is no `api/` directory. All routing is via `index.php?action=xxx` with a f
 
 | Class | Role |
 |---|---|
-| `AliyunTrafficCheck` (925 lines) | Entry point, router, session/auth, orchestrates services |
-| `MonitorService` (580 lines) | Cron monitoring loop: traffic check, circuit breaker, schedules, keepalive, DDNS |
+| `AppContainer` | Dependency Injection container, central bootstrap, exposes service getters |
+| `HttpRouter` | Entry point, router, session/auth, action dispatch |
+| `MonitorService` | Cron monitoring loop: traffic check, circuit breaker, schedules, keepalive, DDNS |
 | `InstanceActionService` (447 lines) | Instance CRUD: start/stop/delete/replace-IP/refresh/release queue |
 | `FrontendResponseBuilder` (445 lines) | DTO building: instance snapshots, config/status for frontend, billing metrics |
 | `Account` (179 lines) | Immutable value object wrapping DB row (not yet wired into consumers) |
