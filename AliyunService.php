@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use AlibabaCloud\Client\AlibabaCloud;
 use AlibabaCloud\Client\Exception\ClientException;
 use AlibabaCloud\Client\Exception\ServerException;
@@ -391,7 +393,7 @@ class AliyunService
      * 控制实例开关机
      * @throws \Exception
      */
-    public function controlInstance($account, $action, $shutdownMode = 'KeepCharging')
+    public function controlInstance($account, InstanceAction $action, $shutdownMode = 'KeepCharging')
     {
         return RetryHandler::execute(function () use ($account, $action, $shutdownMode) {
             AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
@@ -411,7 +413,7 @@ class AliyunService
                 'timeout' => 20.0
             ];
 
-            if ($action === 'stop') {
+            if ($action === InstanceAction::Stop) {
                 $options['query']['StoppedMode'] = $shutdownMode;
             }
 
@@ -419,7 +421,7 @@ class AliyunService
                 ->product('Ecs')
                 ->scheme('https')
                 ->version('2014-05-26')
-                ->action($action === 'stop' ? 'StopInstance' : 'StartInstance')
+                ->action($action === InstanceAction::Stop ? 'StopInstance' : 'StartInstance')
                 ->method('POST')
                 ->host("ecs.{$account['region_id']}.aliyuncs.com")
                 ->options($options)

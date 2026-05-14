@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 class InstanceActionService
 {
     private AliyunService $aliyunService;
@@ -27,7 +29,7 @@ class InstanceActionService
 
     // ---- public API ----
 
-    public function controlInstance($accountId, $action, $shutdownMode = 'KeepCharging', $waitForSync = true, callable $onStatusChanged = null): bool
+    public function controlInstance($accountId, InstanceAction $action, $shutdownMode = 'KeepCharging', $waitForSync = true, callable $onStatusChanged = null): bool
     {
         $targetAccount = $this->configManager->getAccountById($accountId);
         if (!$targetAccount) return false;
@@ -37,21 +39,21 @@ class InstanceActionService
             if ($result) {
                 $label = Helpers::getAccountLogLabel($targetAccount);
                 $instId = $targetAccount->instanceId;
-                $this->db->addLog('info', "实例操作 [{$action}] 成功 [{$label}] {$instId}");
-                $newStatus = $action === 'stop' ? 'Stopping' : 'Starting';
+                $this->db->addLog('info', "实例操作 [{$action->value}] 成功 [{$label}] {$instId}");
+                $newStatus = $action === InstanceAction::Stop ? InstanceStatus::Stopping->value : InstanceStatus::Starting->value;
                 $this->configManager->updateAccountStatus($accountId, $targetAccount->trafficUsed, $newStatus, time());
-                $this->configManager->updateAutoStartBlocked($accountId, $action === 'stop');
+                $this->configManager->updateAutoStartBlocked($accountId, $action === InstanceAction::Stop);
                 if ($onStatusChanged) {
                     $onStatusChanged($targetAccount, $targetAccount->instanceStatus, $newStatus, '用户手动操作。');
                 }
-                if ($action === 'start' && $waitForSync) {
+                if ($action === InstanceAction::Start && $waitForSync) {
                     $this->db->addLog('info', "实例启动成功，DDNS 和状态同步将在下一轮 cron 中自动完成 [{$label}]");
                 }
             }
             return $result;
         } catch (\Throwable $e) {
             $code = $e instanceof \AlibabaCloud\Client\Exception\ClientException ? 'ClientException' : ($e instanceof \AlibabaCloud\Client\Exception\ServerException ? 'ServerException' : 'Exception');
-            $this->db->addLog('error', "实例操作失败 [{$action}]: " . strip_tags($e->getMessage()));
+            $this->db->addLog('error', "实例操作失败 [{$action->value}]: " . strip_tags($e->getMessage()));
             return false;
         }
     }
@@ -196,8 +198,8 @@ class InstanceActionService
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
             $snap = $buildSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'includeSensitive' => true, 'forceRefresh' => $sync]);
-            $snap['instanceStatus'] = 'Releasing';
-            $snap['status'] = 'Releasing';
+            $snap['instanceStatus'] = InstanceStatus::Releasing->value;
+            $snap['status'] = InstanceStatus::Releasing->value;
             $snap['operationLocked'] = true;
             $snap['operationLockedReason'] = '实例正在释放中，后台队列会继续处理。';
             $allInstances[] = $snap;
@@ -223,7 +225,7 @@ class InstanceActionService
             }
 
             try {
-                if ($status === 'Stopped') {
+                if ($status === InstanceStatus::Stopped->value) {
                     if (!$this->releaseManagedEipForPendingAccount($account, $accountLabel)) continue;
                     $result = $this->aliyunService->deleteInstance($account, false);
                     if ($result) {
@@ -241,11 +243,11 @@ class InstanceActionService
                     $this->ddnsService->deleteForAccount($account, $accountsBeforeDelete, '实例已灭迹后清理');
                     $this->configManager->physicallyDeleteAccount($account['id']);
                     $this->ddnsService->reconcileAfterSync($accountsBeforeDelete, $this->configManager->getAccounts(), '实例灭迹后同步');
-                } elseif ($status === 'Unknown') {
+                } elseif ($status === InstanceStatus::Unknown->value) {
                     $this->db->addLog('warning', "后台异步释放引擎暂时无法确认实例状态，将于下一轮重试 [{$accountLabel}]");
-                } elseif (!in_array($status, ['Stopping'])) {
+                } elseif ($status !== InstanceStatus::Stopping->value) {
                     $this->db->addLog('info', "后台异步释放引擎：向活跃实例下发强制离线指令 [{$accountLabel}]");
-                    $this->aliyunService->controlInstance($account, 'stop');
+                    $this->aliyunService->controlInstance($account, InstanceAction::Stop);
                 }
             } catch (\Exception $e) {
                 $this->db->addLog('error', "后台异步释放行动异常，将于下一分钟轮询重试 [{$accountLabel}]: " . strip_tags($e->getMessage()));

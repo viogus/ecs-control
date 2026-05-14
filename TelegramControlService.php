@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 class TelegramControlService
 {
     private $db;
@@ -427,15 +429,15 @@ class TelegramControlService
         }
 
         $status = $inst['instanceStatus'] ?? '';
-        $locked = !empty($inst['operationLocked']) || in_array($status, ['Releasing', 'Released'], true);
+        $locked = !empty($inst['operationLocked']) || in_array($status, [InstanceStatus::Releasing->value, InstanceStatus::Released->value], true);
         $keyboard = [];
-        if (!$locked && $status === 'Stopped') {
+        if (!$locked && $status === InstanceStatus::Stopped->value) {
             $keyboard[] = [['text' => '🚀 开机', 'callback_data' => 'm:start:' . (int) $accountId]];
         }
-        if (!$locked && $status === 'Running') {
+        if (!$locked && $status === InstanceStatus::Running->value) {
             $keyboard[] = [['text' => '🛑 停机', 'callback_data' => 'm:stop:' . (int) $accountId]];
         }
-        if (!$locked && !in_array($status, ['Releasing', 'Released'], true)) {
+        if (!$locked && !in_array($status, [InstanceStatus::Releasing->value, InstanceStatus::Released->value], true)) {
             $keyboard[] = [['text' => '🗑️ 释放实例', 'callback_data' => 'm:release:' . (int) $accountId]];
         }
         $keyboard[] = [['text' => '🔄 刷新状态', 'callback_data' => 'm:refresh:' . (int) $accountId]];
@@ -486,12 +488,12 @@ class TelegramControlService
             return;
         }
 
-        if (($inst['instanceStatus'] ?? '') !== 'Stopped') {
+        if (($inst['instanceStatus'] ?? '') !== InstanceStatus::Stopped->value) {
             $this->api->editMessage($chatId, $messageId, "ℹ️ 当前实例不是已停机状态，无需开机。", $this->instanceKeyboard($accountId));
             return;
         }
 
-        $success = $this->app->controlInstanceAction($accountId, 'start', 'KeepCharging', false);
+        $success = $this->app->controlInstanceAction($accountId, InstanceAction::Start, 'KeepCharging', false);
         $this->db->addLog($success ? 'info' : 'error', "Telegram 控制开机" . ($success ? '成功' : '失败') . " [{$inst['remark']}] {$inst['instanceId']}");
         $this->api->editMessage(
             $chatId,
@@ -509,12 +511,12 @@ class TelegramControlService
             return;
         }
 
-        if (($inst['instanceStatus'] ?? '') !== 'Running') {
+        if (($inst['instanceStatus'] ?? '') !== InstanceStatus::Running->value) {
             $this->api->editMessage($chatId, $messageId, "ℹ️ 当前实例不是运行中状态，无需停机。", $this->instanceKeyboard($accountId));
             return;
         }
 
-        $success = $this->app->controlInstanceAction($accountId, 'stop', 'KeepCharging', false);
+        $success = $this->app->controlInstanceAction($accountId, InstanceAction::Stop, 'KeepCharging', false);
         $this->db->addLog($success ? 'info' : 'error', "Telegram 控制停机" . ($success ? '成功' : '失败') . " [{$inst['remark']}] {$inst['instanceId']}");
         $this->api->editMessage(
             $chatId,

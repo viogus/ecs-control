@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 class TelegramKeyboard
 {
     public static function mainMenu(): array
@@ -34,18 +36,18 @@ class TelegramKeyboard
     public static function statusIcon(string $status): string
     {
         return match ($status) {
-            'Running' => '🟢', 'Starting' => '🟡', 'Stopping' => '🟠',
-            'Stopped' => '🔴', 'Pending' => '🟡', 'Releasing' => '🗑️',
-            'Released' => '⚫', default => '⚪'
+            InstanceStatus::Running->value => '🟢', InstanceStatus::Starting->value => '🟡', InstanceStatus::Stopping->value => '🟠',
+            InstanceStatus::Stopped->value => '🔴', InstanceStatus::Pending->value => '🟡', InstanceStatus::Releasing->value => '🗑️',
+            InstanceStatus::Released->value => '⚫', default => '⚪'
         };
     }
 
     public static function statusLabel(string $status): string
     {
         return match ($status) {
-            'Running' => '运行中', 'Starting' => '启动中', 'Stopping' => '停机中',
-            'Stopped' => '已停止', 'Pending' => '创建中', 'Releasing' => '释放中',
-            'Released' => '已释放', default => ($status ?: '未知')
+            InstanceStatus::Running->value => '运行中', InstanceStatus::Starting->value => '启动中', InstanceStatus::Stopping->value => '停机中',
+            InstanceStatus::Stopped->value => '已停止', InstanceStatus::Pending->value => '创建中', InstanceStatus::Releasing->value => '释放中',
+            InstanceStatus::Released->value => '已释放', default => ($status ?: '未知')
         };
     }
 

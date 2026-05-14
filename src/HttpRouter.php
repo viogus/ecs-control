@@ -1,8 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 class HttpRouter
 {
     private $app;
+    private HttpRequest $request;
     private string $baseDir;
 
     /** @var string[] */
@@ -29,14 +32,17 @@ class HttpRouter
         'get_all_instances',
     ];
 
-    public function __construct($app, ?string $baseDir = null)
+    public function __construct($app, HttpRequest $request, ?string $baseDir = null)
     {
         $this->app = $app;
+        $this->request = $request;
         $this->baseDir = $baseDir ?? dirname(__DIR__);
     }
 
-    public function dispatch(string $action): void
+    public function dispatch(): void
     {
+        $action = $this->request->getAction();
+
         if ($this->dispatchPublic($action)) {
             return;
         }
@@ -67,12 +73,7 @@ class HttpRouter
         echo json_encode($payload, $flags);
     }
 
-    public function readJsonBody(): array
-    {
-        $raw = $GLOBALS['HTTP_ROUTER_TEST_INPUT'] ?? file_get_contents('php://input');
-        $data = json_decode($raw ?: '', true);
-        return is_array($data) ? $data : [];
-    }
+    // Removed readJsonBody, use $this->request->getJsonBody() instead
 
     public function ensureCsrfToken(): void
     {
@@ -84,7 +85,7 @@ class HttpRouter
     public function requireCsrf(): bool
     {
         $this->ensureCsrfToken();
-        $header = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        $header = $this->request->getHeader('X-CSRF-TOKEN', '');
         if (empty($header) || !hash_equals($_SESSION['csrf_token'], $header)) {
             $this->json(['error' => 'CSRF 验证失败，请刷新页面后重试'], 403);
             return false;
@@ -256,7 +257,7 @@ class HttpRouter
             return;
         }
 
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         try {
             if ($this->app->setup($data)) {
                 $_SESSION['is_admin'] = true;
@@ -272,9 +273,9 @@ class HttpRouter
 
     private function handleLogin(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         try {
-            if ($this->app->login($data['password'] ?? '')) {
+            if ($this->app->login($data['password'] ?? '', $this->request->getClientIp())) {
                 session_regenerate_id(true);
                 $_SESSION['is_admin'] = true;
                 $this->ensureCsrfToken();
@@ -359,7 +360,7 @@ class HttpRouter
 
     private function handleSaveConfig(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         if ($this->app->updateConfig($data)) {
             $this->json(['success' => true]);
         } else {
@@ -369,33 +370,33 @@ class HttpRouter
 
     private function handleUploadLogo(): void
     {
-        $this->json($this->app->uploadLogo($_FILES['logo'] ?? []), 200, 0, true);
+        $this->json($this->app->uploadLogo($this->request->getFile('logo') ?? []), 200, 0, true);
     }
 
     private function handleSendTestEmail(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $result = $this->app->sendTestEmail($data['email'] ?? '');
         $this->json(['success' => $result === true, 'message' => $result]);
     }
 
     private function handleSendTestTelegram(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $result = $this->app->sendTestTelegram($data['telegram'] ?? []);
         $this->json(['success' => $result === true, 'message' => $result]);
     }
 
     private function handleSendTestWebhook(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $result = $this->app->sendTestWebhook($data['webhook'] ?? []);
         $this->json(['success' => $result === true, 'message' => $result]);
     }
 
     private function handleRefreshAccount(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $id = $data['id'] ?? 0;
         $result = $this->app->refreshAccount($id);
         if ($result === false) {
@@ -409,7 +410,7 @@ class HttpRouter
 
     private function handleFetchInstances(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
 
         try {
             $instances = $this->app->fetchInstances($data['accessKeyId'] ?? '', $data['accessKeySecret'] ?? '', $data['regionId'] ?? '');
@@ -421,7 +422,7 @@ class HttpRouter
 
     private function handleTestAccount(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
 
         try {
             $this->json($this->app->testAccountCredentials($data['account'] ?? []), 200, 0, true);
@@ -435,7 +436,7 @@ class HttpRouter
 
     private function handleSyncAccountGroup(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
 
         try {
             $this->json($this->app->syncAccountGroup($data['groupKey'] ?? ''), 200, 0, true);
@@ -449,7 +450,7 @@ class HttpRouter
 
     private function handleRestoreScheduleBlock(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
 
         try {
             $this->json($this->app->restoreScheduleAfterTrafficBlock($data['groupKey'] ?? ''), 200, 0, true);
@@ -463,7 +464,7 @@ class HttpRouter
 
     private function handlePreviewEcsCreate(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
 
         try {
             $result = $this->app->previewEcsCreate($data);
@@ -480,7 +481,7 @@ class HttpRouter
 
     private function handleGetEcsDiskOptions(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
 
         try {
             $this->json($this->app->getEcsDiskOptions($data), 200, 0, true);
@@ -491,7 +492,7 @@ class HttpRouter
 
     private function handleCreateEcs(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $previewId = $data['previewId'] ?? '';
         $confirmed = !empty($data['confirmed']);
 
@@ -514,7 +515,7 @@ class HttpRouter
 
     private function handleGetEcsCreateTask(): void
     {
-        $taskId = $_GET['taskId'] ?? '';
+        $taskId = $this->request->getQueryParam('taskId', '');
         $task = $this->app->getEcsCreateTask($taskId);
         if (!$task) {
             $this->json(['success' => false, 'message' => '任务不存在'], 404, 0, true);
@@ -527,13 +528,13 @@ class HttpRouter
 
     private function handleGetLogs(): void
     {
-        $tab = $_GET['tab'] ?? 'action';
+        $tab = $this->request->getQueryParam('tab', 'action');
         $this->json(['data' => $this->app->getSystemLogs($tab)], 200, 0, true);
     }
 
     private function handleClearLogs(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $tab = $data['tab'] ?? 'action';
         if ($this->app->clearSystemLogs($tab)) {
             $this->json(['success' => true]);
@@ -544,7 +545,7 @@ class HttpRouter
 
     private function handleGetHistory(): void
     {
-        $id = $_GET['id'] ?? 0;
+        $id = $this->request->getQueryParam('id', 0);
         $this->json(['data' => $this->app->getAccountHistory($id)], 200, 0, true);
     }
 
@@ -556,30 +557,31 @@ class HttpRouter
 
     private function handleGetAllInstances(): void
     {
-        $input = $this->readJsonBody();
+        $input = $this->request->getJsonBody();
         $sync = ($input['sync'] ?? false) === true;
         $this->json(['data' => $this->app->getAllManagedInstances($sync)], 200, 0, true);
     }
 
     private function handleControlInstance(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $accountId = $data['accountId'] ?? 0;
         $actionType = $data['action'] ?? '';
         $shutdownMode = $data['shutdownMode'] ?? 'KeepCharging';
 
-        if (!in_array($actionType, ['start', 'stop'], true)) {
+        $action = InstanceAction::tryFrom($actionType);
+        if ($action === null) {
             $this->json(['success' => false, 'message' => '无效的操作类型'], 400);
             return;
         }
 
-        $result = $this->app->controlInstanceAction($accountId, $actionType, $shutdownMode);
+        $result = $this->app->controlInstanceAction($accountId, $action, $shutdownMode);
         $this->json(['success' => $result]);
     }
 
     private function handleDeleteInstance(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $accountId = $data['accountId'] ?? 0;
         $forceStop = $data['forceStop'] ?? false;
 
@@ -589,7 +591,7 @@ class HttpRouter
 
     private function handleReplaceInstanceIp(): void
     {
-        $data = $this->readJsonBody();
+        $data = $this->request->getJsonBody();
         $accountId = $data['accountId'] ?? 0;
 
         $this->json($this->app->replaceInstanceIpAction($accountId));

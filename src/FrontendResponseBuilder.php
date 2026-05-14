@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 class FrontendResponseBuilder
 {
     private ConfigManager $configManager;
@@ -141,8 +143,8 @@ class FrontendResponseBuilder
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
             $snap = $this->buildInstanceSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'billingEnabled' => $billingEnabled, 'includeSensitive' => $includeSensitive]);
-            $snap['instanceStatus'] = 'Releasing';
-            $snap['status'] = 'Releasing';
+            $snap['instanceStatus'] = InstanceStatus::Releasing->value;
+            $snap['status'] = InstanceStatus::Releasing->value;
             $snap['operationLocked'] = true;
             $snap['operationLockedReason'] = '实例正在释放中，后台队列会继续处理。';
             $data[] = $snap;
@@ -171,7 +173,7 @@ class FrontendResponseBuilder
         $trafficApiStatus = $account['traffic_api_status'] ?? 'ok';
         $trafficApiMessage = $account['traffic_api_message'] ?? '';
 
-        $isTransientState = in_array($cachedStatus, ['Starting', 'Stopping', 'Pending', 'Unknown'], true);
+        $isTransientState = in_array($cachedStatus, [InstanceStatus::Starting->value, InstanceStatus::Stopping->value, InstanceStatus::Pending->value, InstanceStatus::Unknown->value], true);
         $checkInterval = $isTransientState ? 60 : $userInterval;
 
         if ($forceRefresh || ($currentTime - $lastUpdate) > $checkInterval) {
@@ -210,7 +212,7 @@ class FrontendResponseBuilder
                 $newUpdateTime = $currentTime;
             }
 
-            if ($status === 'Running' && ($account['health_status'] ?? '') !== 'OK') {
+            if ($status === InstanceStatus::Running->value && ($account['health_status'] ?? '') !== 'OK') {
                 $full = $this->safeGetInstanceFullStatus($account);
                 if ($full) {
                     $metadata['health_status'] = $full['healthStatus'];

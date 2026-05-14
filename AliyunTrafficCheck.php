@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 require 'vendor/autoload.php';
 require_once 'Database.php';
 require_once 'ConfigManager.php';
@@ -13,6 +15,9 @@ require_once 'src/BssService.php';
 require_once 'src/ExportService.php';
 require_once 'src/AdminSupportService.php';
 require_once 'src/AccountGroupOperationService.php';
+require_once 'src/AuthManager.php';
+require_once 'src/InstanceStatus.php';
+require_once 'src/InstanceAction.php';
 
 class AliyunTrafficCheck
 {
@@ -29,8 +34,8 @@ class AliyunTrafficCheck
     private $exportService;
     private $adminSupportService;
     private $accountGroupOperationService;
+    private $authManager;
     private $initError = null;
-
 
 
     public function __construct()
@@ -68,6 +73,7 @@ class AliyunTrafficCheck
             $this->adminSupportService = new AdminSupportService(
                 $this->db, $this->configManager, $this->notificationService, __DIR__
             );
+            $this->authManager = new AuthManager($this->db, $this->configManager);
 
             // 注入配置到通知服务
             $this->notificationService->setConfig($this->configManager->getAllSettings());
@@ -92,6 +98,11 @@ class AliyunTrafficCheck
         return $this->configManager;
     }
 
+    public function getAuthManager(): ?AuthManager
+    {
+        return $this->authManager;
+    }
+
     public function isInitialized(): bool
     {
         if ($this->initError)
@@ -99,19 +110,12 @@ class AliyunTrafficCheck
         return $this->configManager->isInitialized();
     }
 
-    public function getAdminPassword()
-    {
-        return $this->configManager->get('admin_password', '');
-    }
+
 
     public function getMonitorKey()
     {
-        $key = $this->configManager->get('monitor_key', '');
-        if (empty($key)) {
-            $key = bin2hex(random_bytes(32));
-            $this->configManager->saveMonitorKey($key);
-        }
-        return $key;
+        if (!$this->authManager) return '';
+        return $this->authManager->getMonitorKey();
     }
 
     public function getPublicBrand()
@@ -125,60 +129,18 @@ class AliyunTrafficCheck
         ];
     }
 
-    public function login($password): bool
+    public function login($password, string $ip = '0.0.0.0'): bool
     {
-        $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-        // 仅当 REMOTE_ADDR 是内网地址（反向代理/Docker 网关）时才信任 X-Forwarded-For
-        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
-            && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $ip = trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
-        }
-
-        $attempts = $this->db->getRecentFailedAttempts($ip, 900);
-        if ($attempts >= 5) {
-            $this->db->addLog('warning', "登录被锁定: 地址 {$ip} 尝试次数过多");
-            throw new Exception("错误次数过多，请 15 分钟后再试。");
-        }
-
-        $adminPass = $this->getAdminPassword();
-        if (empty($adminPass))
-            return false;
-
-        $passwordValid = false;
-
-        if ($this->isPasswordHashed($adminPass)) {
-            $passwordValid = password_verify($password, $adminPass);
-        } else {
-            $passwordValid = hash_equals($adminPass, $password);
-            if ($passwordValid) {
-                $this->configManager->upgradePasswordHash($password);
-            }
-        }
-
-        if ($passwordValid) {
-            $this->db->clearLoginAttempts($ip);
-            $this->db->addLog('info', "管理员登录成功 [地址: {$ip}]");
-            return true;
-        }
-
-        $this->db->recordLoginAttempt($ip);
-        $this->db->addLog('warning', "管理员登录失败 [地址: {$ip}]");
-        return false;
+        if (!$this->authManager) return false;
+        return $this->authManager->login((string)$password, $ip);
     }
-
-    private function isPasswordHashed($password)
-    {
-        return preg_match('/^\$2[aby]?\$/', $password) === 1 || preg_match('/^\$argon2[aid]\$/', $password) === 1;
-    }
-
 
     public function setup($data): bool
     {
         if ($this->initError)
             throw new Exception($this->initError);
-        if ($this->isInitialized())
-            return false;
-        return $this->configManager->updateConfig($data);
+        if (!$this->authManager) return false;
+        return $this->authManager->setup($data);
     }
 
     public function updateConfig($data): bool
@@ -345,7 +307,7 @@ class AliyunTrafficCheck
         return $this->ecsCreateService->getEcsCreateTask($taskId);
     }
 
-    public function controlInstanceAction($accountId, $action, $shutdownMode = 'KeepCharging', $waitForSync = true)
+    public function controlInstanceAction($accountId, InstanceAction $action, $shutdownMode = 'KeepCharging', $waitForSync = true)
     {
         if ($this->initError) return false;
         return $this->instanceActionService->controlInstance($accountId, $action, $shutdownMode, $waitForSync, [$this, 'notifyStatusChangeIfNeeded']);
@@ -372,12 +334,12 @@ class AliyunTrafficCheck
     // 供 controlInstanceAction 回调使用，主监控循环的完整版本在 MonitorService 中
     public function notifyStatusChangeIfNeeded($account, $fromStatus, $toStatus, $reason = '')
     {
-        $fromStatus = (string) ($fromStatus ?: 'Unknown');
-        $toStatus = (string) ($toStatus ?: 'Unknown');
-        if ($fromStatus === $toStatus || !in_array($toStatus, ['Running', 'Stopped'], true)) return;
-        if ($fromStatus === 'Unknown') return;
+        $fromStatus = InstanceStatus::tryFrom((string) ($fromStatus ?: 'Unknown')) ?? InstanceStatus::Unknown;
+        $toStatus = InstanceStatus::tryFrom((string) ($toStatus ?: 'Unknown')) ?? InstanceStatus::Unknown;
+        if ($fromStatus === $toStatus || !in_array($toStatus, [InstanceStatus::Running, InstanceStatus::Stopped], true)) return;
+        if ($fromStatus === InstanceStatus::Unknown) return;
         $accountLabel = Helpers::getAccountLogLabel($account);
-        $result = $this->notificationService->notifyInstanceStatusChanged($accountLabel, $account, $fromStatus, $toStatus, $reason);
+        $result = $this->notificationService->notifyInstanceStatusChanged($accountLabel, $account, $fromStatus->value, $toStatus->value, $reason);
         if ($result === true) {
             $this->db->addLog('info', "通知推送成功 [$accountLabel]");
         } elseif ($result !== false && $result !== true) {

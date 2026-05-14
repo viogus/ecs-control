@@ -57,9 +57,12 @@ function reset_router_state(): void
 
 function dispatch_router(string $action, FakeRouterApp $app): string
 {
-    $router = new HttpRouter($app, dirname(__DIR__));
+    $_GET['action'] = $action;
+    require_once __DIR__ . '/../src/HttpRequest.php';
+    $request = new HttpRequest();
+    $router = new HttpRouter($app, $request, dirname(__DIR__));
     ob_start();
-    $router->dispatch($action);
+    $router->dispatch();
     return ob_get_clean();
 }
 

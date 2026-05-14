@@ -10,10 +10,12 @@ error_reporting(E_ALL & ~E_NOTICE & ~E_DEPRECATED);
 ini_set('display_errors', 0);
 
 require_once 'AliyunTrafficCheck.php';
+require_once 'src/HttpRequest.php';
 require_once 'src/HttpRouter.php';
 
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 
 $app = new AliyunTrafficCheck();
-$router = new HttpRouter($app, __DIR__);
-$router->dispatch($_GET['action'] ?? 'view');
+$request = new HttpRequest();
+$router = new HttpRouter($app, $request, __DIR__);
+$router->dispatch();

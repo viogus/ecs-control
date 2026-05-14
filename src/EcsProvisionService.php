@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use AlibabaCloud\Client\AlibabaCloud;
 use AlibabaCloud\Client\Exception\ClientException;
 use AlibabaCloud\Client\Exception\ServerException;
@@ -472,7 +474,7 @@ class EcsProvisionService
             $instances = $this->describeInstancesByIds($key, $secret, $regionId, [$instanceId]);
             if (!empty($instances)) {
                 $last = $instances[0];
-                if (in_array($last['status'], ['Running', 'Stopped'], true)) return $last;
+                if (in_array($last['status'], [InstanceStatus::Running->value, InstanceStatus::Stopped->value], true)) return $last;
             }
         }
         throw new \Exception("实例创建超时，等待实例状态就绪超时 90 秒");
