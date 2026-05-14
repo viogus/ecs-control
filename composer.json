@@ -10,9 +10,6 @@
         }
     },
     "autoload": {
-        "psr-4": {
-            "EcsControl\\": "src/"
-        },
         "classmap": [
             "./"
         ]

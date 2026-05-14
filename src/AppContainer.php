@@ -152,6 +152,14 @@ class AppContainer
         return $this->accountGroupOperationService;
     }
 
+    public function getMonitorService(): MonitorService
+    {
+        return new MonitorService(
+            $this->db, $this->configManager, $this->aliyunService,
+            $this->notificationService, $this->ddnsService, $this->bssService
+        );
+    }
+
     public function isInitialized(): bool
     {
         if ($this->initError)

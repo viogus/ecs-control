@@ -146,12 +146,12 @@ class MonitorService
         $billingMonth = date('Y-m');
 
         if ($groupKey !== '') {
-            $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE group_key = ? AND traffic_billing_month = ? ORDER BY id ASC LIMIT 1");
+            $stmt = $pdo->prepare("SELECT COALESCE(SUM(traffic_used), 0) FROM accounts WHERE group_key = ? AND traffic_billing_month = ?");
             $stmt->execute([$groupKey, $billingMonth]);
             return (float) $stmt->fetchColumn();
         }
 
-        $stmt = $pdo->prepare("SELECT traffic_used FROM accounts WHERE access_key_id = ? AND region_id = ? AND traffic_billing_month = ? ORDER BY id ASC LIMIT 1");
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(traffic_used), 0) FROM accounts WHERE access_key_id = ? AND region_id = ? AND traffic_billing_month = ?");
         $stmt->execute([$account->accessKeyId ?? '', $account->regionId ?? '', $billingMonth]);
         return (float) $stmt->fetchColumn();
     }
@@ -267,6 +267,9 @@ class MonitorService
     }
 
     // ---- Phase 1: 自适应心跳 ----
+    // NOTE: This method shares traffic/status refresh logic with FrontendResponseBuilder::buildInstanceSnapshot.
+    // Behavioral differences: here we double-check Unknown with 500ms retry, handle protectionSuspended recovery,
+    // and log transient/stable state. Keep both in sync when changing credential validation or traffic fetching.
 
     private function handleAdaptiveHeartbeat($account, int $currentTime, int $userInterval, array &$s): void
     {
@@ -417,6 +420,7 @@ class MonitorService
     private function handleCostCircuitBreaker($account, int $currentTime, string $shutdownMode, array &$s): bool
     {
         if (!$this->bssService) return false;
+        // cost_threshold_enabled controls auto-stop on cost overrun (distinct from enable_billing which controls frontend display)
         $enabled = $this->configManager->get('cost_threshold_enabled', '0') === '1';
         if (!$enabled) return false;
 

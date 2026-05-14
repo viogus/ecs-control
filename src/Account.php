@@ -120,6 +120,13 @@ class Account implements \ArrayAccess
         return substr($this->accessKeyId, 0, 7) . '***';
     }
 
+    public function __debugInfo(): array
+    {
+        $info = get_object_vars($this);
+        $info['accessKeySecret'] = empty($this->accessKeySecret) ? '' : '********';
+        return $info;
+    }
+
     // ArrayAccess for backward compatibility with array-based code
     private function propFor(string $dbCol): ?string { return self::FIELD_MAP[$dbCol] ?? null; }
 

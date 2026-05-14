@@ -73,8 +73,6 @@ class HttpRouter
         echo json_encode($payload, $flags);
     }
 
-    // Removed readJsonBody, use $this->request->getJsonBody() instead
-
     public function ensureCsrfToken(): void
     {
         if (empty($_SESSION['csrf_token'])) {
@@ -124,10 +122,6 @@ class HttpRouter
         }
         if ($action === 'brand_logo') {
             $this->handleBrandLogo();
-            return true;
-        }
-        if ($action === 'get_status') {
-            $this->handleGetStatus();
             return true;
         }
 
@@ -232,6 +226,10 @@ class HttpRouter
             $this->handleReplaceInstanceIp();
             return true;
         }
+        if ($action === 'get_status') {
+            $this->handleGetStatus();
+            return true;
+        }
 
         return false;
     }
@@ -330,11 +328,6 @@ class HttpRouter
         $initError = $this->app->getInitError();
         if ($initError) {
             $this->json(['error' => $initError], 200, 0, true);
-            return;
-        }
-
-        if (!$this->isAdminStrict()) {
-            $this->json(['error' => '请先登录后再操作'], 403, 0, true);
             return;
         }
 
@@ -571,7 +564,7 @@ class HttpRouter
         $actionType = $data['action'] ?? '';
         $shutdownMode = $data['shutdownMode'] ?? 'KeepCharging';
 
-        $action = in_array($actionType, ['start', 'stop', 'delete'], true) ? $actionType : null;
+        $action = in_array($actionType, ['start', 'stop'], true) ? $actionType : null;
         if ($action === null) {
             $this->json(['success' => false, 'message' => '无效的操作类型'], 400);
             return;

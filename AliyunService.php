@@ -14,6 +14,9 @@ class AliyunService
 
     private $trafficCache = [];
 
+    // Note: asDefaultClient() mutates global SDK state. Safe under PHP-FPM's
+    // single-threaded process-per-request model. Would need named clients
+    // (->name('client-' . md5($key))) if ever moved to an async/event-loop runtime.
     private function setDefaultClient($key, $secret, $regionId)
     {
         AlibabaCloud::accessKeyClient($key, $secret)

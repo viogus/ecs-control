@@ -158,6 +158,7 @@ class FrontendResponseBuilder
         ];
     }
 
+    // Shares traffic/status refresh logic with MonitorService::handleAdaptiveHeartbeat. Keep both in sync.
     public function buildInstanceSnapshot($account, array $options = []): array
     {
         $threshold = (int) ($options['threshold'] ?? 95);
@@ -282,15 +283,7 @@ class FrontendResponseBuilder
 
     private function getRegionName($regionId): string
     {
-        $regions = [
-            'cn-hongkong' => '中国香港', 'ap-southeast-1' => '新加坡', 'us-west-1' => '美国(硅谷)',
-            'us-east-1' => '美国(弗吉尼亚)', 'cn-hangzhou' => '华东1(杭州)', 'cn-shanghai' => '华东2(上海)',
-            'cn-qingdao' => '华北1(青岛)', 'cn-beijing' => '华北2(北京)', 'cn-zhangjiakou' => '华北3(张家口)',
-            'cn-huhehaote' => '华北5(呼和浩特)', 'cn-wulanchabu' => '华北6(乌兰察布)',
-            'cn-shenzhen' => '华南1(深圳)', 'cn-heyuan' => '华南2(河源)', 'cn-guangzhou' => '华南3(广州)',
-            'cn-chengdu' => '西南1(成都)', 'ap-northeast-1' => '日本(东京)',
-        ];
-        return $regions[$regionId] ?? $regionId;
+        return TelegramKeyboard::regionName($regionId);
     }
 
     private function safeGetTraffic($account): array
@@ -355,7 +348,9 @@ class FrontendResponseBuilder
             }
         }
 
-        $costInfo['last_updated'] = date('Y-m-d H:i:s');
+        if (isset($costInfo['credit']) || isset($costInfo['monthly_cost'])) {
+            $costInfo['last_updated'] = date('Y-m-d H:i:s');
+        }
         return $costInfo;
     }
 

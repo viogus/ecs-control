@@ -23,12 +23,25 @@ if (!$isCli) {
         echo "访问被拒绝，请使用有效的监控密钥。";
         exit;
     }
+
+    // Rate limiting: max 1 request per 10 seconds per token
+    $pdo = $app->getDb()->getPdo();
+    $rateKey = 'monitor_rate_' . substr(hash('sha256', $authHeader), 0, 16);
+    $stmt = $pdo->prepare("SELECT value FROM settings WHERE key = ? LIMIT 1");
+    $stmt->execute([$rateKey]);
+    $lastRun = (int) $stmt->fetchColumn();
+    if ($lastRun > 0 && (time() - $lastRun) < 10) {
+        http_response_code(429);
+        echo "请求过于频繁，请稍后再试。";
+        exit;
+    }
+    $pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+        ->execute([$rateKey, (string) time()]);
 }
 
 // 输出简洁日志
 echo "--- ECS 服务器管理 开始检测: " . date('Y-m-d H:i:s') . " ---\n";
-$monitor = new MonitorService($app->getDb(), $app->getConfigManager(), $app->getAliyunService(), $app->getNotificationService(), $app->getDdnsService(), $app->getBssService());
-echo $monitor->run();
+echo $app->getMonitorService()->run();
 $app->getInstanceActionService()->processPendingReleases(function($label, $account) use ($app) {
     $notifyResult = $app->getNotificationService()->notifyInstanceReleased(
         $label, $account, '用户前端提交指令后，后台成功执行安全彻底销毁。'

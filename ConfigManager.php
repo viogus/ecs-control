@@ -496,16 +496,20 @@ class ConfigManager
         return $stmt->execute([(string) $date, $id]);
     }
 
-    public function updateScheduleBlockedByTraffic($id, $blocked)
+    public function updateScheduleBlockedByTraffic($id, $blocked, ?string $groupKey = null)
     {
         $stmt = $this->db->prepare("UPDATE accounts SET schedule_blocked_by_traffic = ? WHERE id = ?");
         $result = $stmt->execute([$blocked ? 1 : 0, $id]);
         if ($result) {
-            $rowStmt = $this->db->prepare("SELECT access_key_id, region_id, group_key FROM accounts WHERE id = ? LIMIT 1");
-            $rowStmt->execute([$id]);
-            $row = $rowStmt->fetch();
-            if ($row) {
-                $groupKey = $row['group_key'] ?: AccountSyncService::buildGroupKey($row['access_key_id'] ?? '', $row['region_id'] ?? '');
+            if ($groupKey === null) {
+                $rowStmt = $this->db->prepare("SELECT access_key_id, region_id, group_key FROM accounts WHERE id = ? LIMIT 1");
+                $rowStmt->execute([$id]);
+                $row = $rowStmt->fetch();
+                if ($row) {
+                    $groupKey = $row['group_key'] ?: AccountSyncService::buildGroupKey($row['access_key_id'] ?? '', $row['region_id'] ?? '');
+                }
+            }
+            if ($groupKey !== null) {
                 $this->updateStoredAccountGroupScheduleBlock($groupKey, $blocked);
             }
         }

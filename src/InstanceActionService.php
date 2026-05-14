@@ -268,7 +268,7 @@ class InstanceActionService
         catch (\Exception $e) { return InstanceStatus::Unknown->value; }
     }
 
-    private function releaseManagedEipForPendingAccount(Account &$account, string $accountLabel): bool
+    private function releaseManagedEipForPendingAccount(Account $account, string $accountLabel): bool
     {
         if (($account->publicIpMode ?? '') !== 'eip' || empty($account->eipManaged)) return true;
         try {

@@ -58,15 +58,19 @@ class TelegramKeyboard
         return '🟢';
     }
 
+    private const REGION_NAMES = [
+        'cn-hongkong' => '中国香港', 'ap-southeast-1' => '新加坡', 'ap-northeast-1' => '日本（东京）',
+        'us-west-1' => '美国（硅谷）', 'us-east-1' => '美国（弗吉尼亚）',
+        'cn-hangzhou' => '华东 1（杭州）', 'cn-shanghai' => '华东 2（上海）',
+        'cn-qingdao' => '华北 1（青岛）', 'cn-beijing' => '华北 2（北京）', 'cn-zhangjiakou' => '华北 3（张家口）',
+        'cn-huhehaote' => '华北 5（呼和浩特）', 'cn-wulanchabu' => '华北 6（乌兰察布）',
+        'cn-shenzhen' => '华南 1（深圳）', 'cn-heyuan' => '华南 2（河源）', 'cn-guangzhou' => '华南 3（广州）',
+        'cn-chengdu' => '西南 1（成都）',
+    ];
+
     public static function regionName(string $regionId): string
     {
-        return match ($regionId) {
-            'cn-hongkong' => '中国香港', 'ap-southeast-1' => '新加坡', 'ap-northeast-1' => '日本（东京）',
-            'us-west-1' => '美国（硅谷）', 'us-east-1' => '美国（弗吉尼亚）',
-            'cn-hangzhou' => '华东 1（杭州）', 'cn-shanghai' => '华东 2（上海）',
-            'cn-beijing' => '华北 2（北京）', 'cn-shenzhen' => '华南 1（深圳）',
-            default => ($regionId ?: '-')
-        };
+        return self::REGION_NAMES[$regionId] ?? ($regionId ?: '-');
     }
 
     public static function formatTraffic(float $value): string

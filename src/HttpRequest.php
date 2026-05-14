@@ -48,6 +48,22 @@ class HttpRequest
         return $this->serverParams[$serverKey] ?? $default;
     }
 
+    public static function fromTestData(array $get = [], array $server = [], string $body = ''): self
+    {
+        $GLOBALS['HTTP_ROUTER_TEST_INPUT'] = $body;
+        $oldGet = $_GET;
+        $oldServer = $_SERVER;
+        try {
+            $_GET = $get;
+            $_SERVER = $server;
+            return new self();
+        } finally {
+            $_GET = $oldGet;
+            $_SERVER = $oldServer;
+            unset($GLOBALS['HTTP_ROUTER_TEST_INPUT']);
+        }
+    }
+
     public function getClientIp(): string
     {
         $ip = $this->serverParams['REMOTE_ADDR'] ?? '0.0.0.0';

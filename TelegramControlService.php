@@ -361,10 +361,8 @@ class TelegramControlService
 
     private function refreshAllData()
     {
-        if (method_exists($this->app, 'getInstanceActionService')) {
-            $this->app->getInstanceActionService()->getAllManagedInstances(true, [$this->app->getResponseBuilder(), 'buildInstanceSnapshot']);
-            $this->configManager->load();
-        }
+        $this->app->getInstanceActionService()->getAllManagedInstances(true, [$this->app->getResponseBuilder(), 'buildInstanceSnapshot']);
+        $this->configManager->load();
     }
 
     private function instancesKeyboard($page)
@@ -593,26 +591,22 @@ class TelegramControlService
 
     private function useActionToken($token, $userId, $chatId, $markUsed)
     {
-        $stmt = $this->pdo->prepare("
-            SELECT *
-            FROM telegram_action_tokens
-            WHERE token = ?
-                AND user_id = ?
-                AND chat_id = ?
-                AND used_at = 0
-                AND expires_at >= ?
-            LIMIT 1
+        // Atomic claim: UPDATE first to prevent TOCTOU race, then SELECT the record
+        $now = time();
+        $claim = $this->pdo->prepare("
+            UPDATE telegram_action_tokens
+            SET used_at = ?
+            WHERE token = ? AND user_id = ? AND chat_id = ? AND used_at = 0 AND expires_at >= ?
         ");
-        $stmt->execute([(string) $token, (string) $userId, (string) $chatId, time()]);
-        $record = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$record) {
+        $claim->execute([$now, (string) $token, (string) $userId, (string) $chatId, $now]);
+
+        if ($claim->rowCount() === 0) {
             return null;
         }
 
-        $update = $this->pdo->prepare("UPDATE telegram_action_tokens SET used_at = ? WHERE id = ?");
-        $update->execute([time(), (int) $record['id']]);
-
-        return $record;
+        $stmt = $this->pdo->prepare("SELECT * FROM telegram_action_tokens WHERE token = ? AND user_id = ? AND chat_id = ? LIMIT 1");
+        $stmt->execute([(string) $token, (string) $userId, (string) $chatId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
     private function cleanupExpiredTokens()
