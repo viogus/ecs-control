@@ -15,7 +15,7 @@ export async function syncDdns(db: D1Database, accounts: Account[]): Promise<voi
     const ip = a.public_ip_mode === 'eip' ? (a.eip_address || a.public_ip) : a.public_ip;
     if (!ip) continue;
     try {
-      const slug = a.instance_name || a.remark || a.instance_id.replace('i-', '');
+      const slug = a.remark || a.instance_name || a.instance_id.replace('i-', '');
       const sanitized = slug.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').substring(0, 48) || a.group_key;
       const recordName = `${sanitized}.${domain}`.toLowerCase();
 
