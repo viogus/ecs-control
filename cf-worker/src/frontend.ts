@@ -5,7 +5,7 @@ export function renderHtml(csrfToken: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ECS 服务器管家</title>
-<script>!function(l,i){i=i||0;var u=['https://unpkg.com/vue@3/dist/vue.global.prod.js','https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js','https://cdn.bootcdn.net/ajax/libs/vue/3.5.13/vue.global.prod.js','https://lib.baomitu.com/vue/3.5.13/vue.global.prod.js'];if(i>=u.length)return;var s=document.createElement('script');s.src=u[i];s.onerror=function(){l(i+1)};document.head.appendChild(s)}(loadVue)</script>
+<script>var l=function(i){var u=['https://unpkg.com/vue@3/dist/vue.global.prod.js','https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js','https://cdn.bootcdn.net/ajax/libs/vue/3.5.13/vue.global.prod.js','https://lib.baomitu.com/vue/3.5.13/vue.global.prod.js'];if(i>=u.length)return;var s=document.createElement('script');s.src=u[i];s.onerror=function(){l(i+1)};document.head.appendChild(s)};l(0)</script>
 <noscript><div style="background:#ff3b30;color:#fff;padding:12px;text-align:center">请启用 JavaScript 以使用管理面板</div></noscript>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -559,7 +559,7 @@ createApp({
         const d = await this.api('/api/export');
         if (d.warnings && d.warnings.length) {
           this.exportResult = d.warnings.join('; ');
-          alert(d.warnings.join('\n') + '\n\n请先修复密钥问题后再重新导出。');
+          alert(d.warnings.join('\\n') + '\\n\\n请先修复密钥问题后再重新导出。');
           return;
         }
         if (d.success && d.data) {
