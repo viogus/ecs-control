@@ -12,6 +12,7 @@ import { importFromDocker } from './migration';
 import { renderHtml } from './frontend';
 import { syncAccountGroups, getGroupsFromSettings } from './accounts';
 import { sendEmail, sendWebhook } from './notification';
+import { VUE_SOURCE } from './vue-source';
 import type { MigrationExport } from './types';
 
 async function jsonResponse(data: unknown, status = 200): Promise<Response> {
@@ -313,6 +314,13 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
+
+    // Static assets
+    if (req.method === 'GET' && path === '/vue.js') {
+      return new Response(VUE_SOURCE, {
+        headers: { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=31536000' },
+      });
+    }
 
     // Frontend
     if (req.method === 'GET' && path === '/') {

@@ -24,6 +24,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Generate Vue source constant
+        run: cp ../static/vue.global.prod.js static/vue.global.prod.js && node generate-vue-source.cjs
+
       - name: Init D1 (create if not exists, populate database_id)
         run: |
           # Method 1: list existing D1 databases via JSON API
