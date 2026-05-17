@@ -9,7 +9,7 @@ use AlibabaCloud\Client\Exception\ServerException;
 class AliyunService
 {
     private $regionCache = [];
-    private $managedTagKey = 'ecs-controller-managed';
+    private $managedTagKey = 'ecs-control-managed';
     private $managedTagValue = 'true';
 
     private $trafficCache = [];

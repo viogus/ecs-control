@@ -2,7 +2,7 @@
 A lightweight controller for cloud server monitoring, traffic control, quota protection, and automated operations.
 
 <p align="center">
-  <img src="./icon.png" width="120" height="120" alt="ecs-controller Logo">
+  <img src="./icon.png" width="120" height="120" alt="ecs-control Logo">
 </p>
 
 > **阿里云 流量监控与自动化管理终极解决方案**
@@ -36,7 +36,7 @@ A lightweight controller for cloud server monitoring, traffic control, quota pro
 1. **新建配置文件** `docker-compose.yml`：
 ```yaml
 services:
-  ecs-controller:
+  ecs-control:
     image: ghcr.io/viogus/ecs-control:latest
     container_name: ecs-control
     restart: always

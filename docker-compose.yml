@@ -1,5 +1,5 @@
 services:
-  ecs-controller:
+  ecs-control:
     build: .
     container_name: ecs-control
     restart: always

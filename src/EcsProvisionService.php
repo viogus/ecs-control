@@ -8,7 +8,7 @@ use AlibabaCloud\Client\Exception\ServerException;
 
 class EcsProvisionService
 {
-    private $managedTagKey = 'ecs-controller-managed';
+    private $managedTagKey = 'ecs-control-managed';
     private $managedTagValue = 'true';
 
     private function setDefaultClient($key, $secret, $regionId)
@@ -67,9 +67,9 @@ class EcsProvisionService
                 'min' => $diskRange['min'], 'max' => $diskRange['max'], 'unit' => $diskRange['unit']
             ],
             'network' => [
-                'vpc' => ['mode' => 'auto', 'name' => "ecs-controller-vpc-{$regionId}", 'cidr' => '172.31.0.0/16'],
-                'vswitch' => ['mode' => 'auto', 'name' => "ecs-controller-vsw-{$zone['zoneId']}", 'cidr' => $this->cidrForZone($zone['zoneId'])],
-                'securityGroup' => ['mode' => 'auto', 'name' => "ecs-controller-sg-{$regionId}", 'rules' => [$securityRule]]
+                'vpc' => ['mode' => 'auto', 'name' => "ecs-control-vpc-{$regionId}", 'cidr' => '172.31.0.0/16'],
+                'vswitch' => ['mode' => 'auto', 'name' => "ecs-control-vsw-{$zone['zoneId']}", 'cidr' => $this->cidrForZone($zone['zoneId'])],
+                'securityGroup' => ['mode' => 'auto', 'name' => "ecs-control-sg-{$regionId}", 'rules' => [$securityRule]]
             ],
             'cdtCompatible' => true, 'backupEnabled' => false,
             'pricing' => [
