@@ -16,9 +16,9 @@ echo "Cron daemon started."
 
 # 3. 启动 Telegram 控制轮询 (后台运行，崩溃自动重启)
 # 如果没有配置 Telegram，进程会保持低频等待；配置后按钮控制可秒级响应。
-su -s /bin/sh www-data -c "
+/bin/sh -c "
     while true; do
-        php82 /var/www/html/telegram_worker.php >/dev/null 2>&1
+        su-exec www-data php82 /var/www/html/telegram_worker.php >/dev/null 2>&1
         sleep 5
     done
 " &
@@ -31,7 +31,7 @@ echo "PHP-FPM started."
 
 # 5. 用 PORT 环境变量替换 Nginx 监听端口，默认 43210
 LISTEN_PORT="${PORT:-43210}"
-sed -i "s/listen 80;/listen ${LISTEN_PORT};/" /etc/nginx/http.d/default.conf
+sed -i.bak "s/listen 80;/listen ${LISTEN_PORT};/" /etc/nginx/http.d/default.conf && rm -f /etc/nginx/http.d/default.conf.bak
 echo "Nginx will listen on port ${LISTEN_PORT}"
 
 # 6. 启动 Nginx (前台运行)
