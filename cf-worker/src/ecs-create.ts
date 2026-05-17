@@ -1,7 +1,7 @@
 import { signedRequest } from './aliyun-sign';
 import type { Account, EcsCreatePreview } from './types';
 
-const TAG_KEY = 'ecs-controller-managed';
+const TAG_KEY = 'ecs-control-managed';
 const TAG_VAL = 'true';
 
 export async function buildPreview(account: Account, regionId: string, instanceType = 'ecs.e-c4m1.large', osKey = 'debian_12', publicIpMode: 'ecs_public_ip' | 'eip' = 'ecs_public_ip'): Promise<EcsCreatePreview> {

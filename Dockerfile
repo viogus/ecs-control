@@ -99,7 +99,7 @@ RUN composer dump-autoload -o
 # Stage 3: final
 FROM scratch
 
-LABEL maintainer="ECS-Controller-Docker"
+LABEL maintainer="ECS-Control-Docker"
 
 ARG PORT=43210
 ENV PORT=${PORT} TZ=Asia/Shanghai

@@ -157,7 +157,7 @@ async function handleCreateEcs(): Promise<Response> {
 }
 
 async function handleSendTestEmail(env: Env): Promise<Response> {
-  const ok = await sendEmail(env.DB, 'ECS Controller 测试邮件', '这是一封测试邮件，来自 CF Worker 部署。');
+  const ok = await sendEmail(env.DB, 'ECS Control 测试邮件', '这是一封测试邮件，来自 CF Worker 部署。');
   return jsonResponse({ success: ok, message: ok ? '测试邮件已发送' : '发送失败，请检查邮箱配置' });
 }
 
@@ -166,7 +166,7 @@ async function handleSendTestTg(): Promise<Response> {
 }
 
 async function handleSendTestWh(env: Env): Promise<Response> {
-  const ok = await sendWebhook(env.DB, 'ECS Controller 测试 Webhook');
+  const ok = await sendWebhook(env.DB, 'ECS Control 测试 Webhook');
   return jsonResponse({ success: ok, message: ok ? 'Webhook 测试已发送' : '发送失败，请检查 Webhook 配置' });
 }
 

@@ -12,7 +12,7 @@ export async function sendEmail(db: D1Database, subject: string, body: string): 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         personalizations: [{ to: [{ email: toEmail }] }],
-        from: { email: fromEmail, name: 'ECS Controller' },
+        from: { email: fromEmail, name: 'ECS Control' },
         subject,
         content: [{ type: 'text/plain', value: body }],
       }),
