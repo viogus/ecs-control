@@ -5,20 +5,7 @@ export function renderHtml(csrfToken: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ECS 服务器管家</title>
-<script>
-(function loadVue(i){
-  var urls=['https://unpkg.com/vue@3/dist/vue.global.prod.js',
-            'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js',
-            'https://cdn.bootcdn.net/ajax/libs/vue/3.5.13/vue.global.prod.js',
-            'https://lib.baomitu.com/vue/3.5.13/vue.global.prod.js'];
-  if(i>=urls.length)return;
-  var s=document.createElement('script');
-  s.src=urls[i];
-  s.onload=function(){console.log('Vue loaded from '+i)};
-  s.onerror=function(){loadVue(i+1)};
-  document.head.appendChild(s);
-})(0);
-</script>
+<script>!function(l,i){i=i||0;var u=['https://unpkg.com/vue@3/dist/vue.global.prod.js','https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js','https://cdn.bootcdn.net/ajax/libs/vue/3.5.13/vue.global.prod.js','https://lib.baomitu.com/vue/3.5.13/vue.global.prod.js'];if(i>=u.length)return;var s=document.createElement('script');s.src=u[i];s.onerror=function(){l(i+1)};document.head.appendChild(s)}(loadVue)</script>
 <noscript><div style="background:#ff3b30;color:#fff;padding:12px;text-align:center">请启用 JavaScript 以使用管理面板</div></noscript>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
