@@ -33,3 +33,19 @@ package-lock.json
 build-css.ps1
 static/input.css
 static/tailwindcss-browser.js
+
+# Cloudflare Worker (deployed separately, not needed in Docker image)
+cf-worker
+cf-worker/
+
+# Documentation and tests (not needed at runtime)
+docs
+docs/
+tests
+tests/
+
+# Project metadata and development files
+*.md
+README.*
+icon.png
+*.py

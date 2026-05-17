@@ -1,8 +1,12 @@
 # 第一阶段：构建依赖 (Builder Stage)
 # 使用官方 Composer 镜像安装 PHP 依赖，避免将 Composer 及其缓存带入最终镜像
-FROM composer:2 AS builder
+FROM php:8.2-fpm-alpine AS builder
 
 WORKDIR /app
+
+# 安装 Composer (从官方安装器)
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/bin --filename=composer \
+    && composer --version
 
 # 复制依赖定义文件
 COPY composer.json ./
@@ -10,7 +14,15 @@ COPY composer.json ./
 # 安装依赖 (排除开发依赖，优化自动加载)
 # 注意：SDK Sign::uuid() 的 microtime() 返回带空格的字符串导致签名失败，需修复
 RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs --no-interaction --no-scripts \
-    && sed -i 's/return md5(\$salt . uniqid(md5(microtime(true)), true)) . microtime();/return md5(\$salt . uniqid(md5(microtime(true)), true)) . str_replace(" ", "", microtime());/' /app/vendor/alibabacloud/client/src/Support/Sign.php
+    && sed -i 's/return md5(\$salt . uniqid(md5(microtime(true)), true)) . microtime();/return md5(\$salt . uniqid(md5(microtime(true)), true)) . str_replace(" ", "", microtime());/' /app/vendor/alibabacloud/client/src/Support/Sign.php \
+    && find vendor -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
+    && find vendor -type d -name test -exec rm -rf {} + 2>/dev/null || true \
+    && find vendor -type d -name docs -exec rm -rf {} + 2>/dev/null || true \
+    && find vendor -type d -name doc -exec rm -rf {} + 2>/dev/null || true \
+    && find vendor -type d -name examples -exec rm -rf {} + 2>/dev/null || true \
+    && find vendor -name '*.md' -delete 2>/dev/null || true \
+    && find vendor -name '.gitignore' -delete 2>/dev/null || true \
+    && composer clear-cache
 
 # 复制其余项目文件
 COPY . .
@@ -38,21 +50,17 @@ RUN apk add --no-cache \
     nginx \
     dcron \
     sqlite-libs \
+    oniguruma \
     libcurl \
-    libxml2 \
     tzdata \
     && apk add --no-cache --virtual .build-deps \
     $PHPIZE_DEPS \
     curl-dev \
-    libxml2-dev \
     sqlite-dev \
     oniguruma-dev \
     && docker-php-ext-install \
     curl \
     pdo_sqlite \
-    bcmath \
-    simplexml \
-    xml \
     mbstring \
     opcache \
     # 配置系统时区
