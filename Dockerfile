@@ -58,6 +58,7 @@ RUN mkdir -p /rootfs/bin /rootfs/usr/bin /rootfs/usr/sbin \
         ! -name '*ctype*' ! -name '*iconv*' ! -name '*sodium*' -delete \
     && cp -r /etc/nginx /rootfs/etc/ \
     && cp -r /etc/ssl/certs /rootfs/etc/ssl/ \
+    && ln -sf certs/ca-certificates.crt /rootfs/etc/ssl/cert.pem \
     && cp /etc/passwd /rootfs/etc/ \
     && cp /etc/group /rootfs/etc/ \
     && cp /etc/nsswitch.conf /rootfs/etc/ \
