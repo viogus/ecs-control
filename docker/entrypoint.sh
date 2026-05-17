@@ -18,7 +18,7 @@ echo "Cron daemon started."
 # 如果没有配置 Telegram，进程会保持低频等待；配置后按钮控制可秒级响应。
 su -s /bin/sh www-data -c "
     while true; do
-        php /var/www/html/telegram_worker.php >/dev/null 2>&1
+        php82 /var/www/html/telegram_worker.php >/dev/null 2>&1
         sleep 5
     done
 " &
@@ -26,7 +26,7 @@ echo "Telegram control worker started."
 
 # 4. 启动 PHP-FPM (后台运行)
 # -D 表示 Daemonize (守护进程模式)
-php-fpm -D
+php-fpm82 -D
 echo "PHP-FPM started."
 
 # 5. 用 PORT 环境变量替换 Nginx 监听端口，默认 43210
