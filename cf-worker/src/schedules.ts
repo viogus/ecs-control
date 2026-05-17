@@ -30,6 +30,7 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
     if (status === 'Running') {
       try {
         await controlInstance(account, 'stop', shutdownMode);
+        account.auto_start_blocked = 1;  // Prevent keepalive from overriding schedule
         await addLog(env.DB, 'info', `Scheduled STOP [${label}] ${account.stop_time}`);
         await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
           .bind('Stopping', now.toISOString().substring(0, 10), account.id).run();
@@ -46,6 +47,7 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
     if (status === 'Stopped') {
       try {
         await controlInstance(account, 'start');
+        account.auto_start_blocked = 0;
         await addLog(env.DB, 'info', `Scheduled START [${label}] ${account.start_time}`);
         await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_start_date=?, auto_start_blocked=0 WHERE id=?')
           .bind('Starting', now.toISOString().substring(0, 10), account.id).run();
