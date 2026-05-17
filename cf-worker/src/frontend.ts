@@ -5,8 +5,8 @@ export function renderHtml(csrfToken: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ECS 服务器管家</title>
-<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
-<script>window.Vue||document.write('<script src="https://unpkg.zhimg.com/vue@3/dist/vue.global.prod.js"><\\/script>');</script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"
+  onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js';document.head.appendChild(s);"></script>
 <noscript><div style="background:#ff3b30;color:#fff;padding:12px;text-align:center">请启用 JavaScript 以使用管理面板</div></noscript>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -285,6 +285,7 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
 </div>
 </div>
 <script>
+if (typeof Vue === 'undefined') { document.getElementById('app').innerHTML = '<div class="card" style="text-align:center;padding:40px"><p>Vue.js 加载失败，请刷新页面重试，或检查网络连接。</p></div>'; } else {
 const { createApp } = Vue;
 createApp({
   data() { return {
@@ -597,6 +598,7 @@ createApp({
     logTab() { this.fetchLogs(); },
   },
 }).mount('#app');
+}
 </script>
 </body></html>`;
 }
