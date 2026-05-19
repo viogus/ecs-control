@@ -528,6 +528,7 @@ class MonitorService
                     $s['apiStatusLog'] .= " [定时停机失败]";
                 }
             } else {
+                $this->configManager->updateAutoStartBlocked($account->id, true);
                 $this->configManager->updateScheduleExecutionState($account->id, 'stop', $today);
             }
         }
@@ -550,6 +551,7 @@ class MonitorService
                     $s['apiStatusLog'] .= " [定时开机失败]";
                 }
             } else {
+                $this->configManager->updateAutoStartBlocked($account->id, false);
                 $this->configManager->updateScheduleExecutionState($account->id, 'start', $today);
             }
         }

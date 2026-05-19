@@ -37,7 +37,8 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
         logs.push(`[${label}] Scheduled STOP`);
       } catch (e: any) { await addLog(env.DB, 'error', `Scheduled STOP failed [${label}]: ${e.message}`); }
     } else {
-      await env.DB.prepare('UPDATE accounts SET schedule_last_stop_date=? WHERE id=?')
+      account.auto_start_blocked = 1;
+      await env.DB.prepare('UPDATE accounts SET schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
         .bind(now.toISOString().substring(0, 10), account.id).run();
     }
   }
@@ -54,7 +55,8 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
         logs.push(`[${label}] Scheduled START`);
       } catch (e: any) { await addLog(env.DB, 'error', `Scheduled START failed [${label}]: ${e.message}`); }
     } else {
-      await env.DB.prepare('UPDATE accounts SET schedule_last_start_date=? WHERE id=?')
+      account.auto_start_blocked = 0;
+      await env.DB.prepare('UPDATE accounts SET schedule_last_start_date=?, auto_start_blocked=0 WHERE id=?')
         .bind(now.toISOString().substring(0, 10), account.id).run();
     }
   }
