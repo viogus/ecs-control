@@ -360,7 +360,7 @@ export default {
     }
 
     if (path === '/api/setup' && req.method === 'POST') {
-      const { password, migration } = await req.json() as any;
+      const { password, migration, tz_offset_hours } = await req.json() as any;
       const existingPwd = await getSetting(env.DB, 'admin_password', '');
       if (existingPwd) return jsonResponse({ success: false, message: '已初始化' }, 403);
       if (!password || password.length < 8) return jsonResponse({ success: false, message: '密码至少需要8个字符' });
@@ -373,7 +373,10 @@ export default {
       // Save user's chosen password AFTER import
       const hashed = await hashPassword(password);
       await saveSetting(env.DB, 'admin_password', hashed);
-      if (!migration) await saveSetting(env.DB, 'traffic_threshold', '95');
+      if (!migration) {
+        await saveSetting(env.DB, 'traffic_threshold', '95');
+        await saveSetting(env.DB, 'tz_offset_hours', tz_offset_hours || '8');
+      }
       const csrf = generateCsrfToken();
       const token = await signJwt({ role: 'admin', csrf_token: csrf }, env.JWT_SECRET);
       return jsonResponse({ success: true, token, csrf_token: csrf });

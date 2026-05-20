@@ -2747,6 +2747,29 @@
                                             <span class="switch-slider"></span>
                                         </span>
                                     </label>
+                                    <div class="flex items-center justify-between rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
+                                        <span class="font-semibold text-[#1f2328]">时区偏移 (TZ)</span>
+                                        <select v-model="config.tz_offset_hours" class="glass-input w-48 text-sm">
+                                            <option value="-12">UTC-12 国际日期变更线</option>
+                                            <option value="-10">UTC-10 夏威夷</option>
+                                            <option value="-8">UTC-8 太平洋时间 (US)</option>
+                                            <option value="-7">UTC-7 山地时间 (US)</option>
+                                            <option value="-6">UTC-6 中部时间 (US)</option>
+                                            <option value="-5">UTC-5 东部时间 (US)</option>
+                                            <option value="-3">UTC-3 巴西</option>
+                                            <option value="0">UTC+0 伦敦</option>
+                                            <option value="1">UTC+1 巴黎/柏林</option>
+                                            <option value="2">UTC+2 赫尔辛基/基辅</option>
+                                            <option value="3">UTC+3 莫斯科</option>
+                                            <option value="5">UTC+5 巴基斯坦</option>
+                                            <option value="6">UTC+6 孟加拉</option>
+                                            <option value="7">UTC+7 曼谷/雅加达</option>
+                                            <option value="8" selected>UTC+8 北京/上海/新加坡</option>
+                                            <option value="9">UTC+9 东京/首尔</option>
+                                            <option value="10">UTC+10 悉尼</option>
+                                            <option value="12">UTC+12 奥克兰</option>
+                                        </select>
+                                    </div>
                                     <label class="switch-row flex items-center justify-between gap-4 rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
                                         <span>
                                             <span class="block font-semibold text-[#1f2328]">每月 1 号自动开机</span>
@@ -3762,7 +3785,7 @@
                 const createDefaultConfig = () => ({
                     admin_password: '',
                     traffic_threshold: 95, cost_threshold: 0.48, cost_threshold_enabled: false,
-                    shutdown_mode: 'KeepCharging',
+                    shutdown_mode: 'KeepCharging', tz_offset_hours: '8',
                     threshold_action: 'stop_and_notify',
                     keep_alive: false,
                     monthly_auto_start: false,
@@ -3904,7 +3927,7 @@
                 const setupData = ref({
                     admin_password: '',
                     traffic_threshold: 95, cost_threshold: 0.48, cost_threshold_enabled: false,
-                    shutdown_mode: 'KeepCharging'
+                    shutdown_mode: 'KeepCharging', tz_offset_hours: '8'
                 });
 
                 const statusFilter = ref({ account: '', search: '' });
@@ -4236,6 +4259,7 @@
                         monthly_auto_start: !!source.monthly_auto_start,
                         api_interval: Number(source.api_interval || 600),
                         enable_billing: !!source.enable_billing,
+                        tz_offset_hours: source.tz_offset_hours || '8',
                         AppBrand: source.AppBrand || {},
                         Ddns: source.Ddns || {},
                         Notification: source.Notification || {}
