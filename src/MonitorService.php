@@ -451,6 +451,7 @@ class MonitorService
                 $this->db->addLog('warning', "当月费用 \${$cost} 超过阈值 \${$threshold}，已自动停机 [{$s['accountLabel']}]");
                 $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Stopping->value, $currentTime);
                 $this->configManager->updateAutoStartBlocked($account->id, true);
+                $account->autoStartBlocked = true;
                 $this->configManager->updateScheduleBlockedByTrafficForGroup($s['accountGroupKey'], true);
                 $this->notifyStatusChangeIfNeeded($account, $previousStatus, InstanceStatus::Stopping->value, "当月费用 \${$cost} 超过阈值，已自动停机。");
                 $notifyRes = $this->notificationService->sendTrafficWarning($account->accessKeyId, $cost, ($cost / $threshold) * 100, '费用超限自动停机', (int) $threshold);
@@ -519,6 +520,7 @@ class MonitorService
                     $this->db->addLog('info', "执行定时停机 [{$s['accountLabel']}] {$stopTime}");
                     $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Stopping->value, $currentTime);
                     $this->configManager->updateAutoStartBlocked($account->id, true);
+                    $account->autoStartBlocked = true;
                     $this->configManager->updateScheduleExecutionState($account->id, 'stop', $today);
                     $scheduleNotify = $this->notificationService->notifySchedule('定时停机', $account, "已按计划时间 {$stopTime} 执行停机，停机方式沿用系统设置。");
                     Helpers::logNotificationResult($this->db, $scheduleNotify, $s['accountLabel']);
@@ -529,6 +531,7 @@ class MonitorService
                 }
             } else {
                 $this->configManager->updateAutoStartBlocked($account->id, true);
+                $account->autoStartBlocked = true;
                 $this->configManager->updateScheduleExecutionState($account->id, 'stop', $today);
             }
         }
@@ -541,6 +544,7 @@ class MonitorService
                     $this->db->addLog('info', "执行定时开机 [{$s['accountLabel']}] {$startTime}");
                     $this->configManager->updateAccountStatus($account->id, $s['traffic'], InstanceStatus::Starting->value, $currentTime);
                     $this->configManager->updateAutoStartBlocked($account->id, false);
+                    $account->autoStartBlocked = false;
                     $this->configManager->updateScheduleExecutionState($account->id, 'start', $today);
                     $scheduleNotify = $this->notificationService->notifySchedule('定时开机', $account, "已按计划时间 {$startTime} 执行开机。");
                     Helpers::logNotificationResult($this->db, $scheduleNotify, $s['accountLabel']);
@@ -552,6 +556,7 @@ class MonitorService
                 }
             } else {
                 $this->configManager->updateAutoStartBlocked($account->id, false);
+                $account->autoStartBlocked = false;
                 $this->configManager->updateScheduleExecutionState($account->id, 'start', $today);
             }
         }

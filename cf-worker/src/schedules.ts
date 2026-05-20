@@ -18,7 +18,8 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
   const keepAlive = (await getSetting(env.DB, 'keep_alive', '0')) === '1';
   const monthlyAutoStart = (await getSetting(env.DB, 'monthly_auto_start', '0')) === '1';
   const shutdownMode = await getSetting(env.DB, 'shutdown_mode', 'KeepCharging');
-  const tzOffset = parseInt(await getSetting(env.DB, 'tz_offset_hours', '8'));
+  const rawOffset = parseInt(await getSetting(env.DB, 'tz_offset_hours', '8'));
+  const tzOffset = isNaN(rawOffset) ? 8 : rawOffset;
   const now = new Date();
   const local = applyTzOffset(now, tzOffset);
   const label = account.remark || account.instance_id || account.instance_name;

@@ -375,7 +375,7 @@ export default {
       await saveSetting(env.DB, 'admin_password', hashed);
       if (!migration) {
         await saveSetting(env.DB, 'traffic_threshold', '95');
-        await saveSetting(env.DB, 'tz_offset_hours', tz_offset_hours || '8');
+        await saveSetting(env.DB, 'tz_offset_hours', tz_offset_hours != null ? String(tz_offset_hours) : '8');
       }
       const csrf = generateCsrfToken();
       const token = await signJwt({ role: 'admin', csrf_token: csrf }, env.JWT_SECRET);
