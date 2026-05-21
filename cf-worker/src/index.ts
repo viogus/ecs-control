@@ -419,13 +419,15 @@ export default {
       return acc;
     }
 
-    const accounts = await getAccounts(env.DB).then(a => a.filter(a => a.instance_id && !a.is_deleted));
+    let accounts: any[] = [];
+    try { accounts = await getAccounts(env.DB).then(a => a.filter(a => a.instance_id && !a.is_deleted)); }
+    catch (e: any) { return; }
 
     if (cron === '* * * * *') {
       for (const acc of accounts) {
-        const decrypted = await decryptAccount(acc);
         ctx.waitUntil((async () => {
           try {
+            const decrypted = await decryptAccount(acc);
             const trafficLogs = await runTrafficCheck(env, decrypted);
             const scheduleLogs = await runScheduleCheck(env, decrypted);
             await addLog(env.DB, 'heartbeat',
@@ -434,40 +436,45 @@ export default {
               `Schedule: ${scheduleLogs.length ? scheduleLogs.join(',') : 'none'}`
             );
           } catch (e: any) {
-            await addLog(env.DB, 'error', `Cron check failed [${acc.remark || acc.instance_id}]: ${e.message}`);
+            try { await addLog(env.DB, 'error', `Cron check failed [${acc.remark || acc.instance_id}]: ${e.message}`); } catch {}
           }
         })());
       }
     }
 
     if (cron === '*/10 * * * *') {
-      ctx.waitUntil(syncDdns(env.DB, accounts));
+      ctx.waitUntil((async () => {
+        try { await syncDdns(env.DB, accounts); }
+        catch (e: any) { try { await addLog(env.DB, 'error', `DDNS cron failed: ${e.message}`); } catch {} }
+      })());
     }
 
     if (cron === '5 3 * * *') {
-      try {
-        const cutoff30 = Math.floor(Date.now() / 1000) - 30 * 86400;
-        const cutoff3 = Math.floor(Date.now() / 1000) - 3 * 86400;
-        await env.DB.prepare('DELETE FROM logs WHERE created_at < ? AND type != ?').bind(cutoff30, 'heartbeat').run();
-        await env.DB.prepare("DELETE FROM logs WHERE type = 'heartbeat' AND created_at < ?").bind(cutoff3).run();
-        await env.DB.prepare('DELETE FROM login_attempts WHERE attempt_time < ?').bind(cutoff30).run();
+      ctx.waitUntil((async () => {
+        try {
+          const cutoff30 = Math.floor(Date.now() / 1000) - 30 * 86400;
+          const cutoff3 = Math.floor(Date.now() / 1000) - 3 * 86400;
+          await env.DB.prepare('DELETE FROM logs WHERE created_at < ? AND type != ?').bind(cutoff30, 'heartbeat').run();
+          await env.DB.prepare("DELETE FROM logs WHERE type = 'heartbeat' AND created_at < ?").bind(cutoff3).run();
+          await env.DB.prepare('DELETE FROM login_attempts WHERE attempt_time < ?').bind(cutoff30).run();
 
-        const pending = await env.DB.prepare('SELECT * FROM accounts WHERE is_deleted = 1').all();
-        for (const acc of pending.results as any[]) {
-          const secret = String(acc.access_key_secret ?? '');
-          const plainSecret = isEncrypted(secret) ? await decrypt(secret, env.ENCRYPTION_KEY) : secret;
-          const fakeAcc = { ...acc, access_key_secret: plainSecret } as any;
-          try {
-            if (acc.instance_id) await deleteInstance(fakeAcc);
-            await env.DB.prepare("UPDATE accounts SET is_deleted = 2, instance_status = 'Released' WHERE id = ?").bind(acc.id).run();
-            await addLog(env.DB, 'warning', `Instance released by cleanup [${acc.instance_id}]`);
-          } catch (e: any) {
-            await addLog(env.DB, 'error', `Cleanup release failed [${acc.instance_id}]: ${e.message}`);
+          const pending = await env.DB.prepare('SELECT * FROM accounts WHERE is_deleted = 1').all();
+          for (const acc of pending.results as any[]) {
+            const secret = String(acc.access_key_secret ?? '');
+            const plainSecret = isEncrypted(secret) ? await decrypt(secret, env.ENCRYPTION_KEY) : secret;
+            const fakeAcc = { ...acc, access_key_secret: plainSecret } as any;
+            try {
+              if (acc.instance_id) await deleteInstance(fakeAcc);
+              await env.DB.prepare("UPDATE accounts SET is_deleted = 2, instance_status = 'Released' WHERE id = ?").bind(acc.id).run();
+              await addLog(env.DB, 'warning', `Instance released by cleanup [${acc.instance_id}]`);
+            } catch (e: any) {
+              await addLog(env.DB, 'error', `Cleanup release failed [${acc.instance_id}]: ${e.message}`);
+            }
           }
+        } catch (e: any) {
+          try { await addLog(env.DB, 'error', `Daily cleanup failed: ${e.message}`); } catch {}
         }
-      } catch (e: any) {
-        await addLog(env.DB, 'error', `Daily cleanup failed: ${e.message}`);
-      }
+      })());
     }
   },
 };
