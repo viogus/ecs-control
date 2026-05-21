@@ -425,9 +425,14 @@ export default {
 
     if (cron === '* * * * *') {
       for (const acc of accounts) {
+        let decrypted: any;
+        try { decrypted = await decryptAccount(acc); }
+        catch (e: any) {
+          try { await addLog(env.DB, 'error', `Decrypt failed [${acc.remark || acc.instance_id}]: ${e.message}`); } catch {}
+          continue;
+        }
         ctx.waitUntil((async () => {
           try {
-            const decrypted = await decryptAccount(acc);
             const trafficLogs = await runTrafficCheck(env, decrypted);
             const scheduleLogs = await runScheduleCheck(env, decrypted);
             await addLog(env.DB, 'heartbeat',
@@ -468,7 +473,7 @@ export default {
               await env.DB.prepare("UPDATE accounts SET is_deleted = 2, instance_status = 'Released' WHERE id = ?").bind(acc.id).run();
               await addLog(env.DB, 'warning', `Instance released by cleanup [${acc.instance_id}]`);
             } catch (e: any) {
-              await addLog(env.DB, 'error', `Cleanup release failed [${acc.instance_id}]: ${e.message}`);
+              try { await addLog(env.DB, 'error', `Cleanup release failed [${acc.instance_id}]: ${e.message}`); } catch {}
             }
           }
         } catch (e: any) {
