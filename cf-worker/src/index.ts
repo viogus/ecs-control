@@ -312,6 +312,7 @@ const API_ROUTES: Record<string, Handler> = {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    try {
     const url = new URL(req.url);
     const path = url.pathname;
 
@@ -406,6 +407,7 @@ export default {
     }
 
     return jsonResponse({ error: 'Not found' }, 404);
+    } catch (e: any) { return jsonResponse({ error: 'Internal server error' }, 500); }
   },
 
   // Cron Triggers
