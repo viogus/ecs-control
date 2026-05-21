@@ -38,6 +38,20 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
     return Math.abs(currentMin - targetMin) <= 5;
   }
 
+  // Safety net: block auto-start actions when local time is between scheduled stop and start
+  function inStopWindow(): boolean {
+    if (!scheduleActive) return false;
+    if (!account.schedule_stop_enabled || !account.schedule_start_enabled) return false;
+    if (!/^\d{2}:\d{2}$/.test(account.stop_time) || !/^\d{2}:\d{2}$/.test(account.start_time)) return false;
+    const stopMin = timeToMin(account.stop_time);
+    const startMin = timeToMin(account.start_time);
+    const cur = local.hours * 60 + local.minutes;
+    if (stopMin < startMin) return cur >= stopMin && cur < startMin;
+    return cur >= stopMin || cur < startMin; // overnight stop window
+  }
+
+  const stopWindow = inStopWindow();
+
   // Scheduled stop
   if (scheduleActive && account.schedule_stop_enabled && shouldRun(account.stop_time, account.schedule_last_stop_date)) {
     if (status === 'Running') {
@@ -75,7 +89,7 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
   }
 
   // Monthly auto-start (day 1 in local time)
-  if (monthlyAutoStart && local.day === 1 && !scheduleBlocked && !account.auto_start_blocked) {
+  if (monthlyAutoStart && local.day === 1 && !scheduleBlocked && !account.auto_start_blocked && !stopWindow) {
     if (status === 'Stopped') {
       try {
         await controlInstance(account, 'start');
@@ -88,7 +102,7 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
   }
 
   // Keepalive
-  if (keepAlive && !account.auto_start_blocked && !account.schedule_blocked_by_traffic) {
+  if (keepAlive && !account.auto_start_blocked && !account.schedule_blocked_by_traffic && !stopWindow) {
     if (status === 'Stopped') {
       try {
         await controlInstance(account, 'start');
