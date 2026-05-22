@@ -49,11 +49,21 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
   const shutdownMode = await getSetting(env.DB, 'shutdown_mode', 'KeepCharging');
   const thresholdAction = await getSetting(env.DB, 'threshold_action', 'stop_and_notify');
   const label = account.remark || account.instance_id || account.instance_name;
+  const apiInterval = parseInt(await getSetting(env.DB, 'api_interval', '600'));
+
+  const now = Math.floor(Date.now() / 1000);
+  const cacheAge = now - account.updated_at;
+
+  // Use cached values if within API interval (reduces CPU/Alibaba API calls)
+  if (account.updated_at > 0 && cacheAge < apiInterval) {
+    account.instance_status = account.instance_status; // already set from DB
+    await env.DB.prepare('UPDATE accounts SET updated_at = ? WHERE id = ?').bind(now, account.id).run();
+    return logs;
+  }
 
   const traffic = await safeGetTraffic(account, env);
   const status = await safeGetStatus(account, env);
 
-  const now = Math.floor(Date.now() / 1000);
   const metadata: Record<string, unknown> = {
     traffic_api_status: traffic.status,
     traffic_api_message: traffic.message,
