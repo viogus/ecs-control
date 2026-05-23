@@ -23,7 +23,7 @@ export async function syncDdns(db: D1Database, accounts: Account[]): Promise<voi
         `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?type=A&name=${encodeURIComponent(recordName)}`,
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
       );
-      const list = await listRes.json() as any;
+      const list = await listRes.json().catch(() => ({})) as any;
       const existing = list.result?.[0];
 
       if (existing && existing.content === ip) continue; // unchanged
@@ -35,7 +35,7 @@ export async function syncDdns(db: D1Database, accounts: Account[]): Promise<voi
       const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}${path}`, {
         method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body,
       });
-      const json = await res.json() as any;
+      const json = await res.json().catch(() => ({})) as any;
       if (json.success) {
         await addLog(db, 'info', `DDNS ${existing ? 'updated' : 'created'}: ${recordName} -> ${ip}`);
       }

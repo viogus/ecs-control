@@ -62,7 +62,17 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
         await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
           .bind('Stopping', local.isoDate, account.id).run();
         logs.push(`[${label}] Scheduled STOP`);
-      } catch (e: any) { await addLog(env.DB, 'error', `Scheduled STOP failed [${label}]: ${e.message}`); }
+      } catch (e: any) {
+        // IncorrectInstanceStatus = instance already transitioning, mark schedule serviced
+        if (e.message?.includes('IncorrectInstanceStatus')) {
+          account.auto_start_blocked = 1;
+          await env.DB.prepare('UPDATE accounts SET schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
+            .bind(local.isoDate, account.id).run();
+          await addLog(env.DB, 'warning', `Scheduled STOP skipped [${label}]: already ${account.instance_status}`);
+        } else {
+          await addLog(env.DB, 'error', `Scheduled STOP failed [${label}]: ${e.message}`);
+        }
+      }
     } else {
       account.auto_start_blocked = 1;
       await env.DB.prepare('UPDATE accounts SET schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
@@ -80,7 +90,16 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
         await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_start_date=?, auto_start_blocked=0 WHERE id=?')
           .bind('Starting', local.isoDate, account.id).run();
         logs.push(`[${label}] Scheduled START`);
-      } catch (e: any) { await addLog(env.DB, 'error', `Scheduled START failed [${label}]: ${e.message}`); }
+      } catch (e: any) {
+        if (e.message?.includes('IncorrectInstanceStatus')) {
+          account.auto_start_blocked = 0;
+          await env.DB.prepare('UPDATE accounts SET schedule_last_start_date=?, auto_start_blocked=0 WHERE id=?')
+            .bind(local.isoDate, account.id).run();
+          await addLog(env.DB, 'warning', `Scheduled START skipped [${label}]: already ${account.instance_status}`);
+        } else {
+          await addLog(env.DB, 'error', `Scheduled START failed [${label}]: ${e.message}`);
+        }
+      }
     } else {
       account.auto_start_blocked = 0;
       await env.DB.prepare('UPDATE accounts SET schedule_last_start_date=?, auto_start_blocked=0 WHERE id=?')
