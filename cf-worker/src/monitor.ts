@@ -54,8 +54,9 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
   const now = Math.floor(Date.now() / 1000);
   const cacheAge = now - account.updated_at;
 
-  // Use cached values if within API interval (reduces CPU/Alibaba API calls)
-  if (account.updated_at > 0 && cacheAge < apiInterval) {
+  // Use cached values if within API interval and not in a transient state
+  const isTransient = account.instance_status === 'Starting' || account.instance_status === 'Stopping';
+  if (!isTransient && account.updated_at > 0 && cacheAge < apiInterval) {
     return logs;
   }
 
