@@ -56,8 +56,6 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
 
   // Use cached values if within API interval (reduces CPU/Alibaba API calls)
   if (account.updated_at > 0 && cacheAge < apiInterval) {
-    account.instance_status = account.instance_status; // already set from DB
-    await env.DB.prepare('UPDATE accounts SET updated_at = ? WHERE id = ?').bind(now, account.id).run();
     return logs;
   }
 
