@@ -1,6 +1,6 @@
 import type { Env, Account } from './types';
 import { getSetting, addLog } from './db';
-import { controlInstance } from './aliyun-api';
+import { controlInstance, getInstanceStatus } from './aliyun-api';
 
 function applyTzOffset(utcDate: Date, offsetHours: number): { day: number; hours: number; minutes: number; isoDate: string } {
   const ms = utcDate.getTime() + offsetHours * 3600000;
@@ -54,16 +54,21 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
 
   // Scheduled stop
   if (scheduleActive && account.schedule_stop_enabled && shouldRun(account.stop_time, account.schedule_last_stop_date)) {
-    if (status === 'Running') {
+    // Cached status may be stale; fetch fresh if it disagrees with expected state
+    let effectiveStatus = status;
+    if (status !== 'Running') {
+      try { effectiveStatus = await getInstanceStatus(account); } catch {}
+    }
+    if (effectiveStatus === 'Running') {
       try {
         await controlInstance(account, 'stop', shutdownMode);
-        account.auto_start_blocked = 1;  // Prevent keepalive from overriding schedule
+        account.auto_start_blocked = 1;
+        account.instance_status = 'Stopping';
         await addLog(env.DB, 'info', `Scheduled STOP [${label}] ${account.stop_time}`);
         await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
           .bind('Stopping', local.isoDate, account.id).run();
         logs.push(`[${label}] Scheduled STOP`);
       } catch (e: any) {
-        // IncorrectInstanceStatus = instance already transitioning, mark schedule serviced
         if (e.message?.includes('IncorrectInstanceStatus')) {
           account.auto_start_blocked = 1;
           await env.DB.prepare('UPDATE accounts SET schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
@@ -75,17 +80,24 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
       }
     } else {
       account.auto_start_blocked = 1;
-      await env.DB.prepare('UPDATE accounts SET schedule_last_stop_date=?, auto_start_blocked=1 WHERE id=?')
-        .bind(local.isoDate, account.id).run();
+      account.instance_status = effectiveStatus;
+      await env.DB.prepare('UPDATE accounts SET schedule_last_stop_date=?, auto_start_blocked=1, instance_status=? WHERE id=?')
+        .bind(local.isoDate, effectiveStatus, account.id).run();
     }
   }
 
   // Scheduled start
   if (scheduleActive && account.schedule_start_enabled && shouldRun(account.start_time, account.schedule_last_start_date)) {
-    if (status === 'Stopped') {
+    // Cached status may be stale; fetch fresh if it disagrees with expected state
+    let effectiveStatus = status;
+    if (status !== 'Stopped') {
+      try { effectiveStatus = await getInstanceStatus(account); } catch {}
+    }
+    if (effectiveStatus === 'Stopped') {
       try {
         await controlInstance(account, 'start');
         account.auto_start_blocked = 0;
+        account.instance_status = 'Starting';
         await addLog(env.DB, 'info', `Scheduled START [${label}] ${account.start_time}`);
         await env.DB.prepare('UPDATE accounts SET instance_status=?, schedule_last_start_date=?, auto_start_blocked=0 WHERE id=?')
           .bind('Starting', local.isoDate, account.id).run();
@@ -102,8 +114,9 @@ export async function runScheduleCheck(env: Env, account: Account): Promise<stri
       }
     } else {
       account.auto_start_blocked = 0;
-      await env.DB.prepare('UPDATE accounts SET schedule_last_start_date=?, auto_start_blocked=0 WHERE id=?')
-        .bind(local.isoDate, account.id).run();
+      account.instance_status = effectiveStatus;
+      await env.DB.prepare('UPDATE accounts SET schedule_last_start_date=?, auto_start_blocked=0, instance_status=? WHERE id=?')
+        .bind(local.isoDate, effectiveStatus, account.id).run();
     }
   }
 
