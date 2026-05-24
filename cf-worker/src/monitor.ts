@@ -54,9 +54,16 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
   const now = Math.floor(Date.now() / 1000);
   const cacheAge = now - account.updated_at;
 
-  // Use cached values if within API interval and not in a transient state
-  const isTransient = account.instance_status === 'Starting' || account.instance_status === 'Stopping';
-  if (!isTransient && account.updated_at > 0 && cacheAge < apiInterval) {
+  // Cache hit: skip full API check, refresh status only if transient
+  if (account.updated_at > 0 && cacheAge < apiInterval) {
+    if (account.instance_status === 'Starting' || account.instance_status === 'Stopping') {
+      const freshStatus = await safeGetStatus(account, env);
+      account.instance_status = freshStatus;
+      await env.DB.prepare('UPDATE accounts SET instance_status = ? WHERE id = ?')
+        .bind(freshStatus, account.id).run();
+      // Don't update updated_at — keep old value so transient re-checks every minute
+      // until it settles, at which point updated_at expires naturally for full check
+    }
     return logs;
   }
 
