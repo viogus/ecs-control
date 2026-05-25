@@ -25,6 +25,9 @@ function timestamp(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
+// Module-level key cache: importKey is CPU-expensive, reuse across API calls
+const keyCache = new Map<string, CryptoKey>();
+
 export async function signAndCall(p: SignParams): Promise<Response> {
   const nonce = crypto.randomUUID();
   const ts = timestamp();
@@ -52,10 +55,15 @@ export async function signAndCall(p: SignParams): Promise<Response> {
 
   const stringToSign = `POST&${encode('/')}&${encode(canonQuery)}`;
 
-  // HMAC-SHA1
+  // HMAC-SHA1 with cached key
   const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', enc.encode(p.AccessKeySecret + '&'),
-    { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const keyMaterial = p.AccessKeySecret + '&';
+  let key = keyCache.get(keyMaterial);
+  if (!key) {
+    key = await crypto.subtle.importKey('raw', enc.encode(keyMaterial),
+      { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+    keyCache.set(keyMaterial, key);
+  }
   const sig = await crypto.subtle.sign('HMAC', key, enc.encode(stringToSign));
   const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
   query.Signature = sigB64;
