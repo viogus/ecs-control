@@ -43,13 +43,14 @@ async function safeGetStatus(account: Account, env: Env): Promise<string> {
   }
 }
 
-export async function runTrafficCheck(env: Env, account: Account): Promise<string[]> {
+export async function runTrafficCheck(env: Env, account: Account, preloaded?: Record<string, string>): Promise<string[]> {
+  const cfg = async (k: string, d = '') => preloaded ? (preloaded[k] ?? d) : await getSetting(env.DB, k, d);
   const logs: string[] = [];
-  const threshold = parseInt(await getSetting(env.DB, 'traffic_threshold', '95'));
-  const shutdownMode = await getSetting(env.DB, 'shutdown_mode', 'KeepCharging');
-  const thresholdAction = await getSetting(env.DB, 'threshold_action', 'stop_and_notify');
+  const threshold = parseInt(await cfg('traffic_threshold', '95'));
+  const shutdownMode = await cfg('shutdown_mode', 'KeepCharging');
+  const thresholdAction = await cfg('threshold_action', 'stop_and_notify');
   const label = account.remark || account.instance_id || account.instance_name;
-  const apiInterval = parseInt(await getSetting(env.DB, 'api_interval', '600'));
+  const apiInterval = parseInt(await cfg('api_interval', '600'));
 
   const now = Math.floor(Date.now() / 1000);
   const cacheAge = now - account.updated_at;
@@ -116,9 +117,9 @@ export async function runTrafficCheck(env: Env, account: Account): Promise<strin
   }
 
   // Cost circuit breaker
-  const costEnabled = await getSetting(env.DB, 'cost_threshold_enabled', '0') === '1';
+  const costEnabled = (await cfg('cost_threshold_enabled', '0')) === '1';
   if (costEnabled && status === 'Running' && !account.protection_suspended) {
-    const costThreshold = parseFloat(await getSetting(env.DB, 'cost_threshold', '0.48'));
+    const costThreshold = parseFloat(await cfg('cost_threshold', '0.48'));
     if (costThreshold > 0) {
       try {
         const bill = await getInstanceBill(account, new Date().toISOString().substring(0, 7));

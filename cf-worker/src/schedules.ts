@@ -13,12 +13,13 @@ function applyTzOffset(utcDate: Date, offsetHours: number): { day: number; hours
   };
 }
 
-export async function runScheduleCheck(env: Env, account: Account): Promise<string[]> {
+export async function runScheduleCheck(env: Env, account: Account, preloaded?: Record<string, string>): Promise<string[]> {
+  const cfg = async (k: string, d = '') => preloaded ? (preloaded[k] ?? d) : await getSetting(env.DB, k, d);
   const logs: string[] = [];
-  const keepAlive = (await getSetting(env.DB, 'keep_alive', '0')) === '1';
-  const monthlyAutoStart = (await getSetting(env.DB, 'monthly_auto_start', '0')) === '1';
-  const shutdownMode = await getSetting(env.DB, 'shutdown_mode', 'KeepCharging');
-  const rawOffset = parseInt(await getSetting(env.DB, 'tz_offset_hours', '8'));
+  const keepAlive = (await cfg('keep_alive', '0')) === '1';
+  const monthlyAutoStart = (await cfg('monthly_auto_start', '0')) === '1';
+  const shutdownMode = await cfg('shutdown_mode', 'KeepCharging');
+  const rawOffset = parseInt(await cfg('tz_offset_hours', '8'));
   const tzOffset = isNaN(rawOffset) ? 8 : rawOffset;
   const now = new Date();
   const local = applyTzOffset(now, tzOffset);

@@ -1,6 +1,6 @@
 import type { Env, JwtPayload } from './types';
 import { verifyJwt, signJwt, verifyPassword, hashPassword, generateCsrfToken } from './auth';
-import { getAccounts, getSetting, saveSetting, getLogs, addLog, getAccountById } from './db';
+import { getAccounts, getSetting, getSettings, saveSetting, getLogs, addLog, getAccountById } from './db';
 import { runTrafficCheck } from './monitor';
 import { runScheduleCheck } from './schedules';
 import { syncDdns } from './ddns';
@@ -426,6 +426,8 @@ export default {
     catch (e: any) { return; }
 
     if (cron === '* * * * *') {
+      // Pre-load all settings once (saves 8+ individual getSetting queries per account)
+      const settings = await getSettings(env.DB).catch(() => ({} as Record<string, string>));
       for (const acc of accounts) {
         let decrypted: any;
         try { decrypted = await decryptAccount(acc); }
@@ -435,8 +437,8 @@ export default {
         }
         ctx.waitUntil((async () => {
           try {
-            const trafficLogs = await runTrafficCheck(env, decrypted);
-            const scheduleLogs = await runScheduleCheck(env, decrypted);
+            const trafficLogs = await runTrafficCheck(env, decrypted, settings);
+            const scheduleLogs = await runScheduleCheck(env, decrypted, settings);
             await addLog(env.DB, 'heartbeat',
               `[${acc.remark || acc.instance_id}] ${acc.instance_status} | ` +
               `Traffic: ${trafficLogs.length ? trafficLogs.join(',') : 'OK'} | ` +
