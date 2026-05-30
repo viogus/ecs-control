@@ -52,8 +52,14 @@ class HttpRouter
             return;
         }
 
-        if (in_array($action, $this->mutatingActions, true) && !$this->requireCsrf()) {
-            return;
+        if (in_array($action, $this->mutatingActions, true)) {
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                $this->json(['error' => 'Method not allowed'], 405);
+                return;
+            }
+            if (!$this->requireCsrf()) {
+                return;
+            }
         }
 
         if ($this->dispatchAuthenticated($action)) {

@@ -123,7 +123,11 @@ export async function runScheduleCheck(env: Env, account: Account, preloaded?: R
 
   // Monthly auto-start (day 1 in local time)
   if (monthlyAutoStart && local.day === 1 && !scheduleBlocked && !account.auto_start_blocked && !stopWindow) {
-    if (status === 'Stopped') {
+    let effectiveStatus = status;
+    if (status !== 'Stopped') {
+      try { effectiveStatus = await getInstanceStatus(account); } catch {}
+    }
+    if (effectiveStatus === 'Stopped') {
       try {
         await controlInstance(account, 'start');
         await addLog(env.DB, 'info', `Monthly auto-start [${label}]`);
@@ -136,7 +140,11 @@ export async function runScheduleCheck(env: Env, account: Account, preloaded?: R
 
   // Keepalive
   if (keepAlive && !account.auto_start_blocked && !account.schedule_blocked_by_traffic && !stopWindow) {
-    if (status === 'Stopped') {
+    let effectiveStatus = status;
+    if (status !== 'Stopped') {
+      try { effectiveStatus = await getInstanceStatus(account); } catch {}
+    }
+    if (effectiveStatus === 'Stopped') {
       try {
         await controlInstance(account, 'start');
         await addLog(env.DB, 'info', `Keepalive START [${label}]`);

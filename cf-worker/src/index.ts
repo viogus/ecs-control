@@ -78,10 +78,27 @@ async function handleConfig(env: Env, _body: any, jwt: JwtPayload): Promise<Resp
 async function handleSaveConfig(env: Env, body: any): Promise<Response> {
   for (const [k, v] of Object.entries(body)) {
     if (k === 'csrf_token') continue;
+    if (k === 'account_groups') continue; // handled below with secret merge
     await saveSetting(env.DB, k, String(v));
   }
   if (body.account_groups) {
-    await saveSetting(env.DB, 'account_groups', JSON.stringify(body.account_groups));
+    // Merge masked AccessKeySecret from existing groups (port of PHP ConfigManager line 231-241)
+    let groups = body.account_groups;
+    const existingRaw = await env.DB.prepare("SELECT value FROM settings WHERE key = 'account_groups'").first<{value:string}>();
+    if (existingRaw?.value) {
+      try {
+        const existingGroups: any[] = JSON.parse(existingRaw.value);
+        const existingByKey: Record<string, any> = {};
+        for (const g of existingGroups) { existingByKey[g.groupKey ?? ''] = g; }
+        for (const g of groups) {
+          if ((g.AccessKeySecret ?? '') === '********') {
+            const gk = g.groupKey ?? '';
+            g.AccessKeySecret = existingByKey[gk]?.AccessKeySecret ?? '********';
+          }
+        }
+      } catch { /* keep groups as-is if existing data is corrupt */ }
+    }
+    await saveSetting(env.DB, 'account_groups', JSON.stringify(groups));
   }
   const groups = await getGroupsFromSettings(env.DB);
   if (groups.length) {
