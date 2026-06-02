@@ -122,11 +122,27 @@ function test_get_config_adds_csrf_token_for_logged_in_session(): void
     assert_same($payload['csrf_token'], $_SESSION['csrf_token'] ?? null, 'get_config should store token in session');
 }
 
+function test_mutating_action_get_returns_405(): void
+{
+    reset_router_state();
+    $_SESSION['is_admin'] = true;
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+
+    $app = new FakeRouterApp();
+    $output = dispatch_router('control_instance', $app);
+    $payload = json_decode($output, true);
+
+    assert_same(405, http_response_code(), 'GET to mutating action should return HTTP 405');
+    assert_same(['error' => 'Method not allowed'], $payload, 'GET to mutating action should return method-not-allowed JSON');
+    assert_same([], $app->calls, 'GET to mutating action should not call the app');
+}
+
 function test_mutating_action_requires_valid_csrf_before_calling_app(): void
 {
     reset_router_state();
     $_SESSION['is_admin'] = true;
     $_SESSION['csrf_token'] = 'known-token';
+    $_SERVER['REQUEST_METHOD'] = 'POST';
     $_SERVER['HTTP_X_CSRF_TOKEN'] = 'wrong-token';
 
     $app = new FakeRouterApp();
@@ -143,6 +159,7 @@ function test_control_instance_invalid_action_keeps_bad_request_response(): void
     reset_router_state();
     $_SESSION['is_admin'] = true;
     $_SESSION['csrf_token'] = 'known-token';
+    $_SERVER['REQUEST_METHOD'] = 'POST';
     $_SERVER['HTTP_X_CSRF_TOKEN'] = 'known-token';
     $GLOBALS['HTTP_ROUTER_TEST_INPUT'] = json_encode([
         'accountId' => 10,
@@ -175,6 +192,7 @@ function test_unknown_action_renders_template(): void
 
 test_protected_action_requires_login();
 test_get_config_adds_csrf_token_for_logged_in_session();
+test_mutating_action_get_returns_405();
 test_mutating_action_requires_valid_csrf_before_calling_app();
 test_control_instance_invalid_action_keeps_bad_request_response();
 test_unknown_action_renders_template();

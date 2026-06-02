@@ -10,7 +10,7 @@ import { decrypt, encrypt, isEncrypted } from './crypto';
 import { buildPreview } from './ecs-create';
 import { importFromDocker } from './migration';
 import { renderHtml } from './frontend';
-import { syncAccountGroups, getGroupsFromSettings } from './accounts';
+import { syncAccountGroups, getGroupsFromSettings, buildGroupKey } from './accounts';
 import { sendEmail, sendWebhook } from './notification';
 import { VUE_SOURCE } from './vue-source';
 import type { MigrationExport } from './types';
@@ -88,11 +88,15 @@ async function handleSaveConfig(env: Env, body: any): Promise<Response> {
     if (existingRaw?.value) {
       try {
         const existingGroups: any[] = JSON.parse(existingRaw.value);
+        // Build lookup map with derived key fallback (matching getGroupsFromSettings)
         const existingByKey: Record<string, any> = {};
-        for (const g of existingGroups) { existingByKey[g.groupKey ?? ''] = g; }
+        for (const g of existingGroups) {
+          const gk = g.groupKey || await buildGroupKey(g.AccessKeyId ?? '', g.regionId ?? '');
+          existingByKey[gk] = g;
+        }
         for (const g of groups) {
           if ((g.AccessKeySecret ?? '') === '********') {
-            const gk = g.groupKey ?? '';
+            const gk = g.groupKey || await buildGroupKey(g.AccessKeyId ?? '', g.regionId ?? '');
             g.AccessKeySecret = existingByKey[gk]?.AccessKeySecret ?? '********';
           }
         }
