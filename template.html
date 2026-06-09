@@ -4332,7 +4332,9 @@
                     }
                     fetchingAllInstances.value = true;
                     try {
-                        const res = await fetch('index.php?action=get_all_instances', { method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ sync }) });
+                        const res = await fetch('index.php?action=get_all_instances', sync
+                            ? { method: 'POST', headers: csrfHeaders(), body: JSON.stringify({ sync: true }) }
+                            : {});
                         const data = await res.json();
                         if (data.error) {
                             if (!options.silent) {

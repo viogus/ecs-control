@@ -29,7 +29,6 @@ class HttpRouter
         'replace_instance_ip',
         'logout',
         'export',
-        'get_all_instances',
     ];
 
     public function __construct($app, HttpRequest $request, ?string $baseDir = null)
@@ -563,6 +562,17 @@ class HttpRouter
     {
         $input = $this->request->getJsonBody();
         $sync = ($input['sync'] ?? false) === true;
+
+        if ($sync) {
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                $this->json(['error' => 'Method not allowed'], 405);
+                return;
+            }
+            if (!$this->requireCsrf()) {
+                return;
+            }
+        }
+
         $this->json(['data' => $this->app->getInstanceActionService()->getAllManagedInstances($sync, [$this->app->getResponseBuilder(), 'buildInstanceSnapshot'])], 200, 0, true);
     }
 
