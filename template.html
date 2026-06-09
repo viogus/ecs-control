@@ -5222,7 +5222,7 @@
                     exportDataUrl.value = '';
                     exportDataFilename.value = '';
                     try {
-                        const res = await fetch('index.php?action=export', { headers: csrfHeaders() });
+                        const res = await fetch('index.php?action=export', { method: 'POST', headers: csrfHeaders() });
                         if (!res.ok) {
                             const err = await res.json().catch(() => ({}));
                             throw new Error(err.error || err.message || `HTTP ${res.status}`);
