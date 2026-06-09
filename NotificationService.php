@@ -488,11 +488,27 @@ class NotificationService
         if ($host === false || $host === null) {
             return false;
         }
-        $ip = gethostbyname($host);
-        if ($ip === $host) {
-            return false;
+
+        $records = @dns_get_record($host, DNS_A | DNS_AAAA);
+        if (empty($records)) {
+            // fallback: try gethostbyname for IPv4-only environments
+            $ip = gethostbyname($host);
+            if ($ip === $host) {
+                return false;
+            }
+            $records = [['type' => 'A', 'ip' => $ip]];
         }
-        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+
+        foreach ($records as $record) {
+            $ip = $record['ip'] ?? $record['ipv6'] ?? null;
+            if ($ip === null) continue;
+            $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
+            if (filter_var($ip, FILTER_VALIDATE_IP, $flags) === false) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function formatTraffic($trafficGb)

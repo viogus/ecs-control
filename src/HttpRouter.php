@@ -53,10 +53,12 @@ class HttpRouter
 
         if (in_array($action, $this->mutatingActions, true)) {
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                error_log(sprintf('CSRF: method not POST for action=%s ip=%s', $action, $this->request->getClientIp()));
                 $this->json(['error' => 'Method not allowed'], 405);
                 return;
             }
             if (!$this->requireCsrf()) {
+                error_log(sprintf('CSRF: token mismatch for action=%s ip=%s', $action, $this->request->getClientIp()));
                 return;
             }
         }
@@ -525,8 +527,19 @@ class HttpRouter
             return;
         }
 
-        unset($task['login_password']);
-        $this->json(['success' => true, 'data' => $task], 200, 0, true);
+        $allowed = ['task_id', 'preview_id', 'account_group_key', 'region_id', 'zone_id',
+            'instance_type', 'image_id', 'os_label', 'instance_name', 'vpc_id', 'vswitch_id',
+            'security_group_id', 'internet_max_bandwidth_out', 'system_disk_category',
+            'system_disk_size', 'instance_id', 'public_ip', 'public_ip_mode',
+            'eip_allocation_id', 'eip_address', 'eip_managed', 'login_user',
+            'status', 'step', 'error_message', 'payload', 'created_at', 'updated_at'];
+        $safe = [];
+        foreach ($allowed as $col) {
+            if (array_key_exists($col, $task)) {
+                $safe[$col] = $task[$col];
+            }
+        }
+        $this->json(['success' => true, 'data' => $safe], 200, 0, true);
     }
 
     private function handleGetLogs(): void

@@ -67,13 +67,19 @@ class HttpRequest
     public function getClientIp(): string
     {
         $ip = $this->serverParams['REMOTE_ADDR'] ?? '0.0.0.0';
-        $forwarded = $this->serverParams['HTTP_X_FORWARDED_FOR'] ?? '';
-        
-        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
-            && $forwarded !== '') {
-            $parts = explode(',', $forwarded);
-            return trim($parts[0]);
+
+        $trustedProxy = getenv('TRUSTED_PROXY_IP');
+        if ($trustedProxy && $ip === $trustedProxy) {
+            $forwarded = $this->serverParams['HTTP_X_FORWARDED_FOR'] ?? '';
+            if ($forwarded !== '') {
+                $parts = explode(',', $forwarded);
+                $candidate = trim($parts[0]);
+                if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+                    return $candidate;
+                }
+            }
         }
+
         return $ip;
     }
 }
