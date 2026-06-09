@@ -264,6 +264,7 @@ class HttpRouter
         $data = $this->request->getJsonBody();
         try {
             if ($this->app->getAuthManager()->setup($data)) {
+                session_regenerate_id(true);
                 $_SESSION['is_admin'] = true;
                 $this->ensureCsrfToken();
                 $this->json(['success' => true]);
@@ -343,7 +344,9 @@ class HttpRouter
     private function handleExport(): void
     {
         try {
-            $this->json($this->app->getExportService()->export(), 200, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT, true);
+            $redact = $this->request->getQueryParam('redact') === '1'
+                || ($this->request->getJsonBody()['redact'] ?? false);
+            $this->json($this->app->getExportService()->export($redact), 200, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT, true);
         } catch (Exception $e) {
             $this->json(['success' => false, 'message' => $e->getMessage()], 400, 0, true);
         }

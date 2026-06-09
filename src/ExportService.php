@@ -9,16 +9,17 @@ class ExportService
         $this->configManager = $configManager;
     }
 
-    public function export(): array
+    public function export(bool $redact = false): array
     {
         $settings = $this->configManager->getAllSettings();
         $accounts = $this->configManager->getAccounts();
+        $mask = $redact ? '********' : null;
 
         $decrypted = [];
         foreach ($accounts as $acc) {
             $decrypted[] = [
                 'access_key_id' => $acc['access_key_id'],
-                'access_key_secret' => $acc['access_key_secret'] ?? '',
+                'access_key_secret' => $mask ?? $acc['access_key_secret'] ?? '',
                 'region_id' => $acc['region_id'],
                 'instance_id' => $acc['instance_id'],
                 'group_key' => $acc['group_key'],
@@ -53,6 +54,7 @@ class ExportService
             foreach ($decoded as $g) {
                 $gs = $g['AccessKeySecret'] ?? '';
                 if ($gs === '********') $gs = '';
+                if ($mask !== null) $gs = $mask;
                 $groups[] = [
                     'groupKey' => $g['groupKey'] ?? '',
                     'AccessKeyId' => $g['AccessKeyId'] ?? '',
@@ -74,7 +76,7 @@ class ExportService
             'version' => 1,
             'exported_at' => date('Y-m-d H:i:s'),
             'settings' => [
-                'admin_password' => $settings['admin_password'] ?? '',
+                'admin_password' => $mask ?? $settings['admin_password'] ?? '',
                 'traffic_threshold' => (int)($settings['traffic_threshold'] ?? 95),
                 'shutdown_mode' => $settings['shutdown_mode'] ?? 'KeepCharging',
                 'threshold_action' => $settings['threshold_action'] ?? 'stop_and_notify',
@@ -91,10 +93,10 @@ class ExportService
                 'host' => $settings['notify_host'] ?? '',
                 'port' => $settings['notify_port'] ?? '465',
                 'username' => $settings['notify_username'] ?? '',
-                'password' => $settings['notify_password'] ?? '',
+                'password' => $mask ?? $settings['notify_password'] ?? '',
                 'secure' => $settings['notify_secure'] ?? 'ssl',
                 'tg_enabled' => ($settings['notify_tg_enabled'] ?? '0') === '1',
-                'tg_token' => $settings['notify_tg_token'] ?? '',
+                'tg_token' => $mask ?? $settings['notify_tg_token'] ?? '',
                 'tg_chat_id' => $settings['notify_tg_chat_id'] ?? '',
                 'wh_enabled' => ($settings['notify_wh_enabled'] ?? '0') === '1',
                 'wh_url' => $settings['notify_wh_url'] ?? '',
@@ -105,7 +107,7 @@ class ExportService
                 'enabled' => ($settings['ddns_enabled'] ?? '0') === '1',
                 'domain' => $settings['ddns_domain'] ?? '',
                 'cf_zone_id' => $settings['ddns_cf_zone_id'] ?? '',
-                'cf_token' => $settings['ddns_cf_token'] ?? '',
+                'cf_token' => $mask ?? $settings['ddns_cf_token'] ?? '',
                 'cf_proxied' => ($settings['ddns_cf_proxied'] ?? '0') === '1',
             ],
             'accounts' => $decrypted,
