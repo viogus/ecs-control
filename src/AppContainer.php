@@ -56,8 +56,11 @@ class AppContainer
                 $this->ddnsService,
                 $this->notificationService
             );
+            $this->authManager = new AuthManager($this->db, $this->configManager);
+            $this->accountRefresher = new AccountRefresher($this->db, $this->aliyunService, $this->configManager);
             $this->responseBuilder = new FrontendResponseBuilder(
-                $this->configManager, $this->db, $this->aliyunService, $this->bssService
+                $this->configManager, $this->db, $this->aliyunService, $this->bssService,
+                $this->accountRefresher
             );
             $this->accountGroupOperationService = new AccountGroupOperationService(
                 $this->db,
@@ -74,8 +77,6 @@ class AppContainer
             $this->adminSupportService = new AdminSupportService(
                 $this->db, $this->configManager, $this->notificationService, __DIR__ . '/..'
             );
-            $this->authManager = new AuthManager($this->db, $this->configManager);
-            $this->accountRefresher = new AccountRefresher($this->db, $this->aliyunService, $this->configManager);
 
             // 注入配置到通知服务
             $this->notificationService->setConfig($this->configManager->getAllSettings());

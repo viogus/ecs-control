@@ -8,17 +8,20 @@ class FrontendResponseBuilder
     private Database $db;
     private AliyunService $aliyunService;
     private BssService $bssService;
+    private AccountRefresher $accountRefresher;
 
     public function __construct(
         ConfigManager $configManager,
         Database $db,
         AliyunService $aliyunService,
-        BssService $bssService
+        BssService $bssService,
+        AccountRefresher $accountRefresher
     ) {
         $this->configManager = $configManager;
         $this->db = $db;
         $this->aliyunService = $aliyunService;
         $this->bssService = $bssService;
+        $this->accountRefresher = $accountRefresher;
     }
 
     public function getConfigForFrontend(): array
@@ -170,7 +173,6 @@ class FrontendResponseBuilder
         $currentTime = time();
         $lastUpdate = (int) ($account['updated_at'] ?? 0);
         $cachedStatus = $account['instance_status'] ?? 'Unknown';
-        $newUpdateTime = $currentTime;
         $trafficApiStatus = $account['traffic_api_status'] ?? 'ok';
         $trafficApiMessage = $account['traffic_api_message'] ?? '';
 
@@ -178,50 +180,33 @@ class FrontendResponseBuilder
         $checkInterval = $isTransientState ? 60 : $userInterval;
 
         if ($forceRefresh || ($currentTime - $lastUpdate) > $checkInterval) {
-            $trafficResult = $this->safeGetTraffic($account);
-            $status = $this->safeGetInstanceStatus($account);
+            $accountObj = Account::fromDbRow($account);
+            $result = $this->accountRefresher->refresh($accountObj, $currentTime);
 
-            if ($status === 'Unknown') {
-                $status = $cachedStatus;
+            $traffic = $result->traffic;
+            $status = $result->status;
+            $trafficApiStatus = $result->metadata['traffic_api_status'];
+            $trafficApiMessage = $result->metadata['traffic_api_message'];
+            $lastUpdate = $result->newUpdateTime;
+
+            // Caller-specific: hard-reset protection_suspended when not auth_invalid
+            if (!$result->authInvalid) {
+                $this->configManager->updateAccountStatus(
+                    $account['id'], $traffic, $status, $result->newUpdateTime,
+                    ['protection_suspended' => 0, 'protection_suspend_reason' => '', 'protection_suspend_notified_at' => 0]
+                );
             }
 
-            $metadata = [
-                'traffic_api_status' => $trafficResult['status'] ?? 'ok',
-                'traffic_api_message' => $trafficResult['message'] ?? ''
-            ];
-            if ($this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '')) {
-                $metadata['protection_suspended'] = 1;
-                $metadata['protection_suspend_reason'] = 'credential_invalid';
-            } else {
-                $metadata['protection_suspended'] = 0;
-                $metadata['protection_suspend_reason'] = '';
-                $metadata['protection_suspend_notified_at'] = 0;
-            }
-            $trafficApiStatus = $metadata['traffic_api_status'];
-            $trafficApiMessage = $metadata['traffic_api_message'];
-
-            if (empty($trafficResult['success'])) {
-                $traffic = (float) ($account['traffic_used'] ?? 0);
-                $newUpdateTime = $lastUpdate;
-            } else {
-                $traffic = (float) ($trafficResult['value'] ?? 0);
-                $this->db->addHourlyStat($account['id'], $traffic);
-                $this->db->addDailyStat($account['id'], $traffic);
-            }
-
-            if ($newUpdateTime <= 0) {
-                $newUpdateTime = $currentTime;
-            }
-
+            // Caller-specific: health check on Running instances
             if ($status === InstanceStatus::Running->value && ($account['health_status'] ?? '') !== 'OK') {
                 $full = $this->safeGetInstanceFullStatus($account);
                 if ($full) {
-                    $metadata['health_status'] = $full['healthStatus'];
+                    $this->configManager->updateAccountStatus(
+                        $account['id'], $traffic, $status, $result->newUpdateTime,
+                        ['health_status' => $full['healthStatus']]
+                    );
                 }
             }
-
-            $this->configManager->updateAccountStatus($account['id'], $traffic, $status, $newUpdateTime, $metadata);
-            $lastUpdate = $newUpdateTime;
         } else {
             $traffic = (float) ($account['traffic_used'] ?? 0);
             $status = $cachedStatus;
@@ -286,27 +271,12 @@ class FrontendResponseBuilder
         return TelegramKeyboard::regionName($regionId);
     }
 
-    private function safeGetTraffic($account): array
-    {
-        return Helpers::safeGetCdtTraffic($this->aliyunService, $account);
-    }
-
-    private function safeGetInstanceStatus($account): string
-    {
-        try { return $this->aliyunService->getInstanceStatus($account); }
-        catch (\Exception $e) { return 'Unknown'; }
-    }
-
     private function safeGetInstanceFullStatus($account): ?array
     {
         try { return $this->aliyunService->getInstanceFullStatus($account); }
         catch (\Exception $e) { return null; }
     }
 
-    private function isCredentialInvalidTrafficStatus($status): bool
-    {
-        return trim((string) $status) === 'auth_error';
-    }
 
     private function safeGetBillingInfo($account, string $billingCycle): array
     {
