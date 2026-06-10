@@ -164,7 +164,8 @@ class AppContainer
     {
         return new MonitorService(
             $this->db, $this->configManager, $this->aliyunService,
-            $this->notificationService, $this->ddnsService, $this->bssService
+            $this->notificationService, $this->ddnsService, $this->bssService,
+            $this->accountRefresher
         );
     }
 

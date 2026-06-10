@@ -13,8 +13,9 @@ class MonitorService
     private $notificationService;
     private $ddnsService;
     private $bssService;
+    private $accountRefresher;
 
-    public function __construct($db, $configManager, $aliyunService, $notificationService, $ddnsService, $bssService = null)
+    public function __construct($db, $configManager, $aliyunService, $notificationService, $ddnsService, $bssService = null, $accountRefresher = null)
     {
         $this->db = $db;
         $this->configManager = $configManager;
@@ -22,6 +23,7 @@ class MonitorService
         $this->notificationService = $notificationService;
         $this->ddnsService = $ddnsService;
         $this->bssService = $bssService;
+        $this->accountRefresher = $accountRefresher;
     }
 
     public function run(): string
@@ -129,15 +131,6 @@ class MonitorService
         return (int) $parts[0] * 60 + (int) $parts[1];
     }
 
-    private function isCredentialInvalidTrafficStatus($status)
-    {
-        return trim((string) $status) === 'auth_error';
-    }
-
-    private function safeGetTraffic($account)
-    {
-        return Helpers::safeGetCdtTraffic($this->aliyunService, $account, $this->db);
-    }
 
     private function getGroupTrafficUsed($account)
     {
@@ -191,16 +184,6 @@ class MonitorService
         );
 
         return $trafficBytes / 1024 / 1024 / 1024;
-    }
-
-    private function safeGetInstanceStatus($account)
-    {
-        try {
-            return $this->aliyunService->getInstanceStatus($account);
-        } catch (\Exception $e) {
-            $this->db->addLog('warning', "实例状态查询失败 [" . Helpers::getAccountLogLabel($account) . "]: " . strip_tags($e->getMessage()));
-            return InstanceStatus::Unknown->value;
-        }
     }
 
     private function safeControlInstance($account, string $action, $shutdownMode = 'KeepCharging')
@@ -267,9 +250,8 @@ class MonitorService
     }
 
     // ---- Phase 1: 自适应心跳 ----
-    // NOTE: This method shares traffic/status refresh logic with FrontendResponseBuilder::buildInstanceSnapshot.
-    // Behavioral differences: here we double-check Unknown with 500ms retry, handle protectionSuspended recovery,
-    // and log transient/stable state. Keep both in sync when changing credential validation or traffic fetching.
+    // Traffic/status refresh delegated to AccountRefresher. Caller handles auth recovery, status logging,
+    // and notifyStatusChangeIfNeeded (not suitable for the shared refresher).
 
     private function handleAdaptiveHeartbeat($account, int $currentTime, int $userInterval, array &$s): void
     {
@@ -283,62 +265,41 @@ class MonitorService
             $shouldCheckApi = true;
         }
 
-        $newUpdateTime = $currentTime;
-
         if ($shouldCheckApi) {
-            $trafficResult = $this->safeGetTraffic($account);
-            $status = $this->safeGetInstanceStatus($account);
+            $result = $this->accountRefresher->refresh($account, $currentTime);
 
-            if ($status === InstanceStatus::Unknown->value) {
-                usleep(500000);
-                $status = $this->safeGetInstanceStatus($account);
-            }
+            $s['traffic'] = $result->traffic;
+            $s['status'] = $result->status;
+            $s['apiStatusLog'] = $result->trafficSuccess ? '已更新' : '流量接口异常';
 
-            $metadata = [
-                'traffic_api_status' => $trafficResult['status'] ?? 'ok',
-                'traffic_api_message' => $trafficResult['message'] ?? ''
-            ];
-            $authInvalid = $this->isCredentialInvalidTrafficStatus($trafficResult['status'] ?? '');
-
-            if ($authInvalid) {
-                $metadata['protection_suspended'] = 1;
-                $metadata['protection_suspend_reason'] = 'credential_invalid';
-                $metadata['protection_suspend_notified_at'] = $s['protectionSuspendNotifiedAt'];
+            // Caller-specific: auth recovery / suspended flag management
+            if ($result->authInvalid) {
+                $this->configManager->updateAccountStatus(
+                    $account->id, $result->traffic, $result->status, $result->newUpdateTime,
+                    ['protection_suspend_notified_at' => $s['protectionSuspendNotifiedAt']]
+                );
                 $s['protectionSuspended'] = true;
                 $s['protectionSuspendReason'] = 'credential_invalid';
             } elseif ($s['protectionSuspended'] && $s['protectionSuspendReason'] === 'credential_invalid') {
-                $metadata['protection_suspended'] = 0;
-                $metadata['protection_suspend_reason'] = '';
-                $metadata['protection_suspend_notified_at'] = 0;
+                $this->configManager->updateAccountStatus(
+                    $account->id, $result->traffic, $result->status, $result->newUpdateTime,
+                    ['protection_suspended' => 0, 'protection_suspend_reason' => '', 'protection_suspend_notified_at' => 0]
+                );
                 $s['protectionSuspended'] = false;
                 $s['protectionSuspendReason'] = '';
                 $s['protectionSuspendNotifiedAt'] = 0;
                 $this->db->addLog('info', "账号鉴权已恢复，自动停机保护已重新启用 [{$s['accountLabel']}]");
             }
 
-            if (empty($trafficResult['success'])) {
-                $s['traffic'] = $account->trafficUsed;
-                $s['apiStatusLog'] = "流量接口异常";
-                $newUpdateTime = $lastUpdate;
-            } else {
-                $s['traffic'] = (float) ($trafficResult['value'] ?? 0);
-                $s['apiStatusLog'] = "已更新";
-                $this->db->addHourlyStat($account->id, $s['traffic']);
-                $this->db->addDailyStat($account->id, $s['traffic']);
-            }
-
-            $statusEnum = InstanceStatus::tryFrom($status) ?? InstanceStatus::Unknown;
-
+            // Status logging (caller-specific)
+            $statusEnum = InstanceStatus::tryFrom($result->status) ?? InstanceStatus::Unknown;
             if ($statusEnum === InstanceStatus::Unknown) {
-                $newUpdateTime = $lastUpdate;
-                $s['apiStatusLog'] .= "(状态Unknown)";
+                $s['apiStatusLog'] .= '(状态Unknown)';
             } else {
-                $s['apiStatusLog'] .= $statusEnum->isTransient() ? " [过渡态]" : " [稳定态]";
+                $s['apiStatusLog'] .= $statusEnum->isTransient() ? ' [过渡态]' : ' [稳定态]';
             }
 
-            $this->notifyStatusChangeIfNeeded($account, $cachedStatus->value, $status, '系统同步检测到实例状态变化。');
-            $this->configManager->updateAccountStatus($account->id, $s['traffic'], $status, $newUpdateTime, $metadata);
-            $s['status'] = $status;
+            $this->notifyStatusChangeIfNeeded($account, $cachedStatus->value, $result->status, '系统同步检测到实例状态变化。');
         } else {
             $s['traffic'] = $account->trafficUsed;
             $s['status'] = $account->instanceStatus;
