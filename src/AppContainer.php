@@ -17,6 +17,7 @@ require_once 'src/AdminSupportService.php';
 require_once 'src/AccountGroupOperationService.php';
 require_once 'src/AuthManager.php';
 require_once 'src/InstanceStatus.php';
+require_once 'src/AccountRefresher.php';
 
 
 class AppContainer
@@ -35,6 +36,7 @@ class AppContainer
     private $adminSupportService;
     private $accountGroupOperationService;
     private $authManager;
+    private $accountRefresher;
     private $initError = null;
 
     public function __construct()
@@ -73,6 +75,7 @@ class AppContainer
                 $this->db, $this->configManager, $this->notificationService, __DIR__ . '/..'
             );
             $this->authManager = new AuthManager($this->db, $this->configManager);
+            $this->accountRefresher = new AccountRefresher($this->db, $this->aliyunService, $this->configManager);
 
             // 注入配置到通知服务
             $this->notificationService->setConfig($this->configManager->getAllSettings());
@@ -100,6 +103,11 @@ class AppContainer
     public function getAuthManager(): ?AuthManager
     {
         return $this->authManager;
+    }
+
+    public function getAccountRefresher(): AccountRefresher
+    {
+        return $this->accountRefresher;
     }
 
     public function getAliyunService(): AliyunService
