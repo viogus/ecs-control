@@ -180,8 +180,7 @@ class FrontendResponseBuilder
         $checkInterval = $isTransientState ? 60 : $userInterval;
 
         if ($forceRefresh || ($currentTime - $lastUpdate) > $checkInterval) {
-            $accountObj = Account::fromDbRow($account);
-            $result = $this->accountRefresher->refresh($accountObj, $currentTime);
+            $result = $this->accountRefresher->refresh($account, $currentTime);
 
             $traffic = $result->traffic;
             $status = $result->status;
