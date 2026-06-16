@@ -136,9 +136,7 @@ class Account implements \ArrayAccess
     {
         $prop = self::FIELD_MAP[$offset] ?? null;
         if ($prop === null) return null;
-        $value = $this->$prop;
-        if (is_bool($value)) return $value ? 1 : 0;
-        return $value;
+        return $this->$prop;
     }
 
     private static ?array $propertyTypes = null;

@@ -38,6 +38,17 @@ class ConfigManager
         return EncryptionManager::isEncrypted($value);
     }
 
+    private function encryptGroupSecrets(array $groups): array
+    {
+        foreach ($groups as &$g) {
+            if (!empty($g['AccessKeySecret']) && !$this->isEncryptedValue($g['AccessKeySecret'])) {
+                $g['AccessKeySecret'] = $this->encryptValue($g['AccessKeySecret']);
+            }
+        }
+        unset($g);
+        return $groups;
+    }
+
     public function load()
     {
         $this->configCache = [];
@@ -241,8 +252,9 @@ class ConfigManager
             }
             unset($acc);
             $groups = AccountSyncService::normalizeAccountGroups($accounts);
-            $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
             $this->syncAccountGroups(true, $groups);
+            $groups = $this->encryptGroupSecrets($groups);
+            $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
 
             $this->db->commit();
             $this->load();
@@ -562,6 +574,7 @@ class ConfigManager
         unset($group);
 
         if ($changed) {
+            $groups = $this->encryptGroupSecrets($groups);
             $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
         }
     }
@@ -585,6 +598,7 @@ class ConfigManager
         unset($group);
 
         if ($changed) {
+            $groups = $this->encryptGroupSecrets($groups);
             $this->saveSetting('account_groups', json_encode($groups, JSON_UNESCAPED_UNICODE));
         }
     }

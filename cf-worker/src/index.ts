@@ -10,7 +10,7 @@ import { decrypt, encrypt, isEncrypted } from './crypto';
 import { buildPreview } from './ecs-create';
 import { importFromDocker } from './migration';
 import { renderHtml } from './frontend';
-import { syncAccountGroups, getGroupsFromSettings, buildGroupKey } from './accounts';
+import { syncAccountGroups, getGroupsFromSettings, mergeMaskedAccountGroupSecrets, encryptGroupSecrets } from './accounts';
 import { sendEmail, sendWebhook } from './notification';
 import { VUE_SOURCE } from './vue-source';
 import type { MigrationExport } from './types';
@@ -81,30 +81,15 @@ async function handleSaveConfig(env: Env, body: any): Promise<Response> {
     if (k === 'account_groups') continue; // handled below with secret merge
     await saveSetting(env.DB, k, String(v));
   }
-  if (body.account_groups) {
-    // Merge masked AccessKeySecret from existing groups (port of PHP ConfigManager line 231-241)
-    let groups = body.account_groups;
+  if (Object.prototype.hasOwnProperty.call(body, 'account_groups')) {
     const existingRaw = await env.DB.prepare("SELECT value FROM settings WHERE key = 'account_groups'").first<{value:string}>();
-    if (existingRaw?.value) {
-      try {
-        const existingGroups: any[] = JSON.parse(existingRaw.value);
-        // Build lookup map with derived key fallback (matching getGroupsFromSettings)
-        const existingByKey: Record<string, any> = {};
-        for (const g of existingGroups) {
-          const gk = g.groupKey || await buildGroupKey(g.AccessKeyId ?? '', g.regionId ?? '');
-          existingByKey[gk] = g;
-        }
-        for (const g of groups) {
-          if ((g.AccessKeySecret ?? '') === '********') {
-            const gk = g.groupKey || await buildGroupKey(g.AccessKeyId ?? '', g.regionId ?? '');
-            g.AccessKeySecret = existingByKey[gk]?.AccessKeySecret ?? '********';
-          }
-        }
-      } catch { /* keep groups as-is if existing data is corrupt */ }
-    }
-    await saveSetting(env.DB, 'account_groups', JSON.stringify(groups));
+    const groups = await mergeMaskedAccountGroupSecrets(body.account_groups, existingRaw?.value);
+    // Encrypt before persisting (mirrors PHP ConfigManager::encryptGroupSecrets).
+    // Decryption happens on read in getGroupsFromSettings().
+    const encrypted = await encryptGroupSecrets(groups, env.ENCRYPTION_KEY);
+    await saveSetting(env.DB, 'account_groups', JSON.stringify(encrypted));
   }
-  const groups = await getGroupsFromSettings(env.DB);
+  const groups = await getGroupsFromSettings(env.DB, env.ENCRYPTION_KEY);
   if (groups.length) {
     await syncAccountGroups(env.DB, env.ENCRYPTION_KEY, groups, (type, msg) => addLog(env.DB, type, msg));
   }
@@ -139,7 +124,7 @@ async function handleClearLogs(env: Env, body: any): Promise<Response> {
 
 async function handleRefreshAccount(env: Env, body: any): Promise<Response> {
   const { groupKey } = body;
-  const groups = await getGroupsFromSettings(env.DB);
+  const groups = await getGroupsFromSettings(env.DB, env.ENCRYPTION_KEY);
   const group = groups.find(g => g.groupKey === groupKey);
   if (!group) return jsonResponse({ success: false, message: 'Group not found' });
   await syncAccountGroups(env.DB, env.ENCRYPTION_KEY, [group], (type, msg) => addLog(env.DB, type, msg));
@@ -158,7 +143,7 @@ async function handleReplaceIp(): Promise<Response> {
 
 async function handlePreviewCreate(env: Env, body: any): Promise<Response> {
   const { groupKey, regionId, instanceType, osKey, publicIpMode } = body;
-  const groups = await getGroupsFromSettings(env.DB);
+  const groups = await getGroupsFromSettings(env.DB, env.ENCRYPTION_KEY);
   const group = groups.find(g => g.groupKey === groupKey);
   if (!group) return jsonResponse({ success: false, message: 'Group not found' });
   const account: any = { ...group, access_key_secret: group.AccessKeySecret };

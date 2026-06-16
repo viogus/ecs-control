@@ -19,7 +19,14 @@ class AccountSyncService
         if (!empty($raw)) {
             $decoded = json_decode($raw, true);
             if (is_array($decoded)) {
-                return $this->normalizeAccountGroups($decoded, true);
+                $groups = $this->normalizeAccountGroups($decoded, true);
+                foreach ($groups as &$g) {
+                    if (!empty($g['AccessKeySecret'])) {
+                        $g['AccessKeySecret'] = $this->decryptValue($g['AccessKeySecret']);
+                    }
+                }
+                unset($g);
+                return $groups;
             }
         }
         return [];
@@ -282,8 +289,11 @@ class AccountSyncService
 
     private function encryptValue(string $value): string
     {
-        if (!function_exists('sodium_crypto_secretbox') || empty($value)) return $value;
-        $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        return 'ENC1' . base64_encode($nonce . sodium_crypto_secretbox($value, $nonce, $this->encryptionKey));
+        return EncryptionManager::encrypt($value, $this->encryptionKey);
+    }
+
+    private function decryptValue(string $value): string
+    {
+        return EncryptionManager::decrypt($value, $this->encryptionKey);
     }
 }

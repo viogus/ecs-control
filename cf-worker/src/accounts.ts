@@ -1,5 +1,5 @@
 import type { Account, AccountGroup } from './types';
-import { decrypt, encrypt } from './crypto';
+import { decrypt, encrypt, isEncrypted } from './crypto';
 import { getInstances } from './aliyun-api';
 import { rowToAccount, getAccounts, addLog } from './db';
 
@@ -8,27 +8,83 @@ export async function buildGroupKey(accessKeyId: string, regionId: string): Prom
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
 }
 
-export async function getGroupsFromSettings(db: D1Database): Promise<AccountGroup[]> {
+export async function mergeMaskedAccountGroupSecrets(groups: unknown, existingRaw?: string | null): Promise<Record<string, unknown>[]> {
+  const normalizedGroups = Array.isArray(groups) ? groups.map(group => ({ ...(group as Record<string, unknown>) })) : [];
+  if (!existingRaw) {
+    return normalizedGroups;
+  }
+
+  try {
+    const existingGroups = JSON.parse(existingRaw);
+    if (!Array.isArray(existingGroups)) {
+      return normalizedGroups;
+    }
+
+    const existingByKey: Record<string, Record<string, unknown>> = {};
+    for (const group of existingGroups as Record<string, unknown>[]) {
+      const groupKey = String(group.groupKey ?? '');
+      const derivedKey = groupKey || await buildGroupKey(String(group.AccessKeyId ?? ''), String(group.regionId ?? ''));
+      existingByKey[derivedKey] = group;
+    }
+
+    for (const group of normalizedGroups) {
+      if ((group.AccessKeySecret ?? '') === '********') {
+        const groupKey = String(group.groupKey ?? '');
+        const derivedKey = groupKey || await buildGroupKey(String(group.AccessKeyId ?? ''), String(group.regionId ?? ''));
+        group.AccessKeySecret = existingByKey[derivedKey]?.AccessKeySecret ?? '********';
+      }
+    }
+  } catch {
+    // Keep the submitted groups as-is if stored JSON is corrupt.
+  }
+
+  return normalizedGroups;
+}
+
+/**
+ * Encrypt plaintext AccessKeySecret in account groups before persisting to settings.
+ * Mirrors PHP ConfigManager::encryptGroupSecrets().
+ * Skips already-encrypted values (checked by crypto.isEncrypted) to avoid double-encryption
+ * on partial updates (e.g. schedule block toggles via updateStoredAccountGroupScheduleBlock).
+ */
+export async function encryptGroupSecrets(groups: Record<string, unknown>[], encKey: string): Promise<Record<string, unknown>[]> {
+    for (const g of groups) {
+        const s = String(g.AccessKeySecret ?? '');
+        if (s && s !== '********' && !isEncrypted(s)) {
+            g.AccessKeySecret = await encrypt(s, encKey);
+        }
+    }
+    return groups;
+}
+
+
+export async function getGroupsFromSettings(db: D1Database, encKey?: string): Promise<AccountGroup[]> {
   const raw = await db.prepare("SELECT value FROM settings WHERE key = 'account_groups'")
     .first<{ value: string }>();
   if (!raw?.value) return [];
   try {
     const groups = JSON.parse(raw.value);
     if (!Array.isArray(groups)) return [];
-    return Promise.all(groups.map(async (g: any) => ({
-      groupKey: g.groupKey ?? await buildGroupKey(g.AccessKeyId ?? '', g.regionId ?? ''),
-      AccessKeyId: g.AccessKeyId ?? '',
-      AccessKeySecret: g.AccessKeySecret ?? '',
-      regionId: g.regionId ?? '',
-      siteType: g.siteType ?? (g.regionId?.startsWith('cn-') && g.regionId !== 'cn-hongkong' ? 'china' : 'international'),
-      maxTraffic: parseFloat(g.maxTraffic ?? 200),
-      remark: g.remark ?? '',
-      scheduleEnabled: !!(g.scheduleEnabled ?? false),
-      scheduleStartEnabled: !!(g.scheduleStartEnabled ?? false),
-      scheduleStopEnabled: !!(g.scheduleStopEnabled ?? false),
-      startTime: g.startTime ?? '',
-      stopTime: g.stopTime ?? '',
-      scheduleBlockedByTraffic: !!(g.scheduleBlockedByTraffic ?? false),
+    return Promise.all(groups.map(async (g: any) => {
+      let secret: string = g.AccessKeySecret ?? '';
+      if (encKey && isEncrypted(secret)) {
+        secret = await decrypt(secret, encKey);
+      }
+      return {
+        groupKey: g.groupKey ?? await buildGroupKey(g.AccessKeyId ?? '', g.regionId ?? ''),
+        AccessKeyId: g.AccessKeyId ?? '',
+        AccessKeySecret: secret,
+        regionId: g.regionId ?? '',
+        siteType: g.siteType ?? (g.regionId?.startsWith('cn-') && g.regionId !== 'cn-hongkong' ? 'china' : 'international'),
+        maxTraffic: parseFloat(g.maxTraffic ?? 200),
+        remark: g.remark ?? '',
+        scheduleEnabled: !!(g.scheduleEnabled ?? false),
+        scheduleStartEnabled: !!(g.scheduleStartEnabled ?? false),
+        scheduleStopEnabled: !!(g.scheduleStopEnabled ?? false),
+        startTime: g.startTime ?? '',
+        stopTime: g.stopTime ?? '',
+        scheduleBlockedByTraffic: !!(g.scheduleBlockedByTraffic ?? false),
+      };
     })));
   } catch { return []; }
 }
