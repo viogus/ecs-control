@@ -85,7 +85,7 @@ export async function getGroupsFromSettings(db: D1Database, encKey?: string): Pr
         stopTime: g.stopTime ?? '',
         scheduleBlockedByTraffic: !!(g.scheduleBlockedByTraffic ?? false),
       };
-    })));
+    }));
   } catch { return []; }
 }
 
