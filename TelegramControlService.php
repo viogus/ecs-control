@@ -284,13 +284,17 @@ class TelegramControlService
             return false;
         }
 
+        // 私聊所有者始终允许，避免配置白名单后把自己锁在外面
+        if ($chatId !== '' && $chatId[0] !== '-' && $chatId === $userId) {
+            return true;
+        }
+
         $allowed = $this->parseCsvIds($this->settings['notify_tg_allowed_user_ids'] ?? '');
         if (!empty($allowed)) {
             return in_array($userId, $allowed, true);
         }
 
-        // 私聊场景下 chat_id 通常等于 from.id；群聊未配置白名单时不允许控制。
-        return $chatId !== '' && $chatId[0] !== '-' && $chatId === $userId;
+        return false;
     }
 
     private function parseCsvIds($value)

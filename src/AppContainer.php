@@ -43,8 +43,8 @@ class AppContainer
     {
         try {
             $this->db = new Database();
-            $this->configManager = new ConfigManager($this->db);
             $this->aliyunService = new AliyunService();
+            $this->configManager = new ConfigManager($this->db, $this->aliyunService);
             $this->ecsProvisionService = new EcsProvisionService();
             $this->bssService = new BssService();
             $this->notificationService = new NotificationService();

@@ -5,12 +5,14 @@ class AccountSyncService
     private Database $db;
     private array $configCache;
     private string $encryptionKey;
+    private ?AliyunService $aliyunService;
 
-    public function __construct(Database $db, array $configCache, string $encryptionKey)
+    public function __construct(Database $db, array $configCache, string $encryptionKey, ?AliyunService $aliyunService = null)
     {
         $this->db = $db;
         $this->configCache = $configCache;
         $this->encryptionKey = $encryptionKey;
+        $this->aliyunService = $aliyunService;
     }
 
     public function getAccountGroups(): array
@@ -120,7 +122,7 @@ class AccountSyncService
         foreach ($groups as $group) {
             $configuredGroupKeys[] = $group['groupKey'];
             try {
-                $service = new AliyunService();
+                $service = $this->aliyunService ?? new AliyunService();
                 $instances = $service->getInstances($group['AccessKeyId'], $group['AccessKeySecret'], $group['regionId']);
             } catch (\Exception $e) {
                 if ($onLog) $onLog('warning', "实例同步失败 [" . substr($group['AccessKeyId'], 0, 7) . "***] {$group['regionId']}: " . strip_tags($e->getMessage()));

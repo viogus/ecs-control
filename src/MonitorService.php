@@ -30,10 +30,7 @@ class MonitorService
     {
         $this->db->pruneLogs(30, 3);
         $this->db->pruneStats();
-
-        if (date('H') === '04' && date('i') === '00') {
-            $this->db->vacuum();
-        }
+        $this->configManager->maybeVacuum();
 
         $logs = [];
         $currentTime = time();
@@ -53,11 +50,10 @@ class MonitorService
 
         $this->configManager->updateLastRunTime(time());
 
-        $lastDdnsSync = (int) ($this->configManager->get('last_ddns_sync', 0));
+        $lastDdnsSync = $this->configManager->getLastDdnsSyncTime();
         if ((time() - $lastDdnsSync) >= 600) {
             $this->ddnsService->syncForAccounts($this->configManager->getAccounts(), 'Cron 周期同步');
-            $pdo = $this->db->getPdo();
-            $pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_ddns_sync', ?)")->execute([time()]);
+            $this->configManager->updateLastDdnsSyncTime(time());
             $this->configManager->load();
         }
 

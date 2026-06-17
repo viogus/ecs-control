@@ -285,11 +285,11 @@ class NotificationService
         $mail->MsgHTML($body);
         $mail->AddAddress($to, $name);
 
-        // 修改：返回 true 或 错误信息字符串
         if ($mail->Send()) {
             return true;
         } else {
-            return $mail->ErrorInfo;
+            error_log('PHPMailer send failure: ' . $mail->ErrorInfo);
+            return 'SMTP 发送失败，请检查邮箱配置';
         }
     }
 

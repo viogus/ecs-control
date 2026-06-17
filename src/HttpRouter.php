@@ -87,6 +87,11 @@ class HttpRouter
         }
     }
 
+    public function rotateCsrfToken(): void
+    {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+
     public function requireCsrf(): bool
     {
         $this->ensureCsrfToken();
@@ -267,7 +272,7 @@ class HttpRouter
             if ($this->app->getAuthManager()->setup($data)) {
                 session_regenerate_id(true);
                 $_SESSION['is_admin'] = true;
-                $this->ensureCsrfToken();
+                $this->rotateCsrfToken();
                 $this->json(['success' => true]);
             } else {
                 $this->json(['success' => false, 'message' => '初始化失败']);
@@ -284,7 +289,7 @@ class HttpRouter
             if ($this->app->getAuthManager()->login($data['password'] ?? '', $this->request->getClientIp())) {
                 session_regenerate_id(true);
                 $_SESSION['is_admin'] = true;
-                $this->ensureCsrfToken();
+                $this->rotateCsrfToken();
                 $this->json(['success' => true, 'csrf_token' => $_SESSION['csrf_token']]);
             } else {
                 $this->json(['success' => false, 'message' => '密码错误']);

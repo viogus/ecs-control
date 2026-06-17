@@ -9,13 +9,13 @@ class ConfigManager
     private $encryptionKey = null;
     private AccountSyncService $accountSync;
 
-    public function __construct(Database $db)
+    public function __construct(Database $db, ?AliyunService $aliyunService = null)
     {
         $this->database = $db;
         $this->db = $db->getPdo();
         $this->encryptionKey = $this->getEncryptionKey();
         $this->load();
-        $this->accountSync = new AccountSyncService($this->database, $this->configCache, $this->encryptionKey);
+        $this->accountSync = new AccountSyncService($this->database, $this->configCache, $this->encryptionKey, $aliyunService);
     }
 
     private function getEncryptionKey()
@@ -210,6 +210,29 @@ class ConfigManager
     public function getLastInstanceSyncTime()
     {
         return (int) ($this->configCache['last_instance_sync'] ?? 0);
+    }
+
+    public function updateLastDdnsSyncTime($time)
+    {
+        $this->saveSetting('last_ddns_sync', $time);
+    }
+
+    public function getLastDdnsSyncTime(): int
+    {
+        return (int) ($this->configCache['last_ddns_sync'] ?? 0);
+    }
+
+    public function maybeVacuum(): bool
+    {
+        $lastVacuum = (int) ($this->configCache['last_vacuum'] ?? 0);
+        if ((time() - $lastVacuum) < 86400) {
+            return false;
+        }
+        $this->db->exec("VACUUM");
+        $stmt = $this->db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_vacuum', ?)");
+        $stmt->execute([(string) time()]);
+        $this->configCache['last_vacuum'] = (string) time();
+        return true;
     }
 
     public function updateConfig($data): bool

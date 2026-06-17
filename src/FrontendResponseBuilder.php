@@ -317,7 +317,7 @@ class FrontendResponseBuilder
             }
         }
 
-        if (isset($costInfo['credit']) || isset($costInfo['monthly_cost'])) {
+        if (isset($costInfo['monthly_cost'])) {
             $costInfo['last_updated'] = date('Y-m-d H:i:s');
         }
         return $costInfo;

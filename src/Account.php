@@ -94,7 +94,7 @@ class Account implements \ArrayAccess
         $a->scheduleBlockedByTraffic = !empty($row['schedule_blocked_by_traffic']);
         $a->autoStartBlocked = !empty($row['auto_start_blocked']);
         $a->remark = (string) ($row['remark'] ?? '');
-        $a->siteType = (string) ($row['site_type'] ?? 'international');
+        $a->siteType = (string) ($row['site_type'] ?: AccountSyncService::inferSiteType((string) ($row['region_id'] ?? '')));
         $a->instanceName = (string) ($row['instance_name'] ?? '');
         $a->instanceType = (string) ($row['instance_type'] ?? '');
         $a->internetMaxBandwidthOut = (int) ($row['internet_max_bandwidth_out'] ?? 0);
