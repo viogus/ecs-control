@@ -49,11 +49,34 @@ class ExportService
 
         $rawGroups = $settings['account_groups'] ?? '';
         $groups = [];
-        if (!empty($rawGroups)) {
+        $decryptedGroups = $this->configManager->getAccountGroups();
+        if (!empty($decryptedGroups)) {
+            foreach ($decryptedGroups as $g) {
+                $gs = $g['AccessKeySecret'] ?? '';
+                if ($mask !== null) $gs = $mask;
+                $groups[] = [
+                    'groupKey' => $g['groupKey'] ?? '',
+                    'AccessKeyId' => $g['AccessKeyId'] ?? '',
+                    'AccessKeySecret' => $gs,
+                    'regionId' => $g['regionId'] ?? '',
+                    'siteType' => $g['siteType'] ?? 'international',
+                    'maxTraffic' => (float)($g['maxTraffic'] ?? 200),
+                    'remark' => $g['remark'] ?? '',
+                    'scheduleEnabled' => !empty($g['scheduleEnabled']),
+                    'scheduleStartEnabled' => !empty($g['scheduleStartEnabled']),
+                    'scheduleStopEnabled' => !empty($g['scheduleStopEnabled']),
+                    'startTime' => $g['startTime'] ?? '',
+                    'stopTime' => $g['stopTime'] ?? '',
+                ];
+            }
+        } else if (!empty($rawGroups)) {
             $decoded = json_decode($rawGroups, true) ?: [];
             foreach ($decoded as $g) {
                 $gs = $g['AccessKeySecret'] ?? '';
                 if ($gs === '********') $gs = '';
+                if ($mask === null && !empty($gs)) {
+                    $gs = $this->configManager->decryptAccountSecret($gs);
+                }
                 if ($mask !== null) $gs = $mask;
                 $groups[] = [
                     'groupKey' => $g['groupKey'] ?? '',
@@ -71,7 +94,6 @@ class ExportService
                 ];
             }
         }
-
         return [
             'version' => 1,
             'exported_at' => date('Y-m-d H:i:s'),

@@ -8,7 +8,7 @@ export async function buildGroupKey(accessKeyId: string, regionId: string): Prom
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
 }
 
-export async function mergeMaskedAccountGroupSecrets(groups: unknown, existingRaw?: string | null): Promise<Record<string, unknown>[]> {
+export async function mergeMaskedAccountGroupSecrets(groups: unknown, existingRaw?: string | null, encKey?: string): Promise<Record<string, unknown>[]> {
   const normalizedGroups = Array.isArray(groups) ? groups.map(group => ({ ...(group as Record<string, unknown>) })) : [];
   if (!existingRaw) {
     return normalizedGroups;
@@ -31,7 +31,19 @@ export async function mergeMaskedAccountGroupSecrets(groups: unknown, existingRa
       if ((group.AccessKeySecret ?? '') === '********') {
         const groupKey = String(group.groupKey ?? '');
         const derivedKey = groupKey || await buildGroupKey(String(group.AccessKeyId ?? ''), String(group.regionId ?? ''));
-        group.AccessKeySecret = existingByKey[derivedKey]?.AccessKeySecret ?? '********';
+        const existingSecret = existingByKey[derivedKey]?.AccessKeySecret ?? '********';
+        // Try to decrypt with current key — if it fails, leave as ********
+        // so the user is forced to re-enter the secret
+        if (existingSecret !== '********' && encKey && isEncrypted(existingSecret)) {
+          try {
+            await decrypt(existingSecret, encKey);
+          } catch {
+            // Can't decrypt — existing secret uses a different key
+            group.AccessKeySecret = '********';
+            continue;
+          }
+        }
+        group.AccessKeySecret = existingSecret;
       }
     }
   } catch {
@@ -50,8 +62,19 @@ export async function mergeMaskedAccountGroupSecrets(groups: unknown, existingRa
 export async function encryptGroupSecrets(groups: Record<string, unknown>[], encKey: string): Promise<Record<string, unknown>[]> {
     for (const g of groups) {
         const s = String(g.AccessKeySecret ?? '');
-        if (s && s !== '********' && !isEncrypted(s)) {
-            g.AccessKeySecret = await encrypt(s, encKey);
+        if (s && s !== '********') {
+            if (isEncrypted(s)) {
+                // Try to decrypt with current key first (handles cross-key re-encryption)
+                try {
+                    const plaintext = await decrypt(s, encKey);
+                    g.AccessKeySecret = await encrypt(plaintext, encKey);
+                } catch {
+                    // Decryption failed (wrong key) — leave as-is
+                }
+            } else {
+                // Plaintext — encrypt with current key
+                g.AccessKeySecret = await encrypt(s, encKey);
+            }
         }
     }
     return groups;
