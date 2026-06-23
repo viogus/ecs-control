@@ -83,7 +83,7 @@ async function handleSaveConfig(env: Env, body: any): Promise<Response> {
   }
   if (Object.prototype.hasOwnProperty.call(body, 'account_groups')) {
     const existingRaw = await env.DB.prepare("SELECT value FROM settings WHERE key = 'account_groups'").first<{value:string}>();
-    const groups = await mergeMaskedAccountGroupSecrets(body.account_groups, existingRaw?.value);
+    const groups = await mergeMaskedAccountGroupSecrets(body.account_groups, existingRaw?.value, env.ENCRYPTION_KEY);
     // Encrypt before persisting (mirrors PHP ConfigManager::encryptGroupSecrets).
     // Decryption happens on read in getGroupsFromSettings().
     const encrypted = await encryptGroupSecrets(groups, env.ENCRYPTION_KEY);

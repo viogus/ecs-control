@@ -1,5 +1,6 @@
 import type { MigrationExport } from './types';
-import { encrypt, isEncrypted } from './crypto';
+import { decrypt, encrypt, isEncrypted } from './crypto';
+import { encryptGroupSecrets } from './accounts';
 import { saveSetting } from './db';
 
 export interface ImportOptions { skipPassword?: boolean; skipDefaults?: boolean; }
@@ -116,9 +117,22 @@ async function writeSettings(db: D1Database, data: MigrationExport, opts: Import
   if (d.cf_token && d.cf_token !== '********') await set('ddns_cf_token', String(d.cf_token));
   await set('ddns_cf_proxied', d.cf_proxied ? '1' : '0');
 
-  await set('account_groups', JSON.stringify(data.account_groups));
+  // Re-encrypt account_groups secrets with the current encryption key
+  // (handles cross-key migration: Docker-encrypted -> CF Worker key)
+  const importedGroups = data.account_groups || [];
+  if (importedGroups.length > 0) {
+    const withPlaintext = await Promise.all(importedGroups.map(async (g: any) => {
+      let secret = String(g.AccessKeySecret ?? '');
+      if (secret && secret !== '********' && isEncrypted(secret)) {
+        // Try to decrypt (for cross-key re-encryption)
+        try { secret = await decrypt(secret, encKey); } catch { secret = ''; }
+      }
+      return { ...g, AccessKeySecret: secret };
+    }));
+    const encrypted = await encryptGroupSecrets(withPlaintext, encKey);
+    await set('account_groups', JSON.stringify(encrypted));
+  }
 }
-
 async function rollback(db: D1Database, importId: string, newImportId: string, snapshot: Record<string, string> | null, writtenKeys: Set<string>): Promise<void> {
   // Restore settings
   if (snapshot) {
