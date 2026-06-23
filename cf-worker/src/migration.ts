@@ -54,7 +54,7 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
 
   // Phase 2: write all settings (accounts not yet visible)
   try {
-    await writeSettings(db, data, opts, writtenKeys);
+    await writeSettings(db, data, opts, writtenKeys, encKey);
   } catch (e) {
     await rollback(db, importId, newImportId, settingsSnapshot, writtenKeys);
     throw e;
@@ -80,7 +80,7 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
   await db.prepare("UPDATE accounts SET import_id = '' WHERE import_id = ?").bind(newImportId).run();
 }
 
-async function writeSettings(db: D1Database, data: MigrationExport, opts: ImportOptions, writtenKeys: Set<string>): Promise<void> {
+async function writeSettings(db: D1Database, data: MigrationExport, opts: ImportOptions, writtenKeys: Set<string>, encKey: string): Promise<void> {
   const s = data.settings;
   const set = (k: string, v: string) => { writtenKeys.add(k); return saveSetting(db, k, v); };
 
