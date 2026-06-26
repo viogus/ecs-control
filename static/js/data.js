@@ -13,17 +13,17 @@
     { id: 'ap-southeast-6', name: '菲律宾（马尼拉）' },
     { id: 'ap-southeast-7', name: '泰国（曼谷）' },
     { id: 'me-east-1', name: '阿联酋（迪拜）' },
-    { id: 'cn-hangzhou', name: '华东 1（杭州）' },
-    { id: 'cn-shanghai', name: '华东 2（上海）' },
-    { id: 'cn-qingdao', name: '华北 1（青岛）' },
-    { id: 'cn-beijing', name: '华北 2（北京）' },
-    { id: 'cn-zhangjiakou', name: '华北 3（张家口）' },
-    { id: 'cn-huhehaote', name: '华北 5（呼和浩特）' },
-    { id: 'cn-wulanchabu', name: '华北 6（乌兰察布）' },
-    { id: 'cn-shenzhen', name: '华南 1（深圳）' },
-    { id: 'cn-heyuan', name: '华南 2（河源）' },
-    { id: 'cn-guangzhou', name: '华南 3（广州）' },
-    { id: 'cn-chengdu', name: '西南 1（成都）' }
+    { id: 'cn-hangzhou', name: '华东1（杭州）' },
+    { id: 'cn-shanghai', name: '华东2（上海）' },
+    { id: 'cn-qingdao', name: '华北1（青岛）' },
+    { id: 'cn-beijing', name: '华北2（北京）' },
+    { id: 'cn-zhangjiakou', name: '华北3（张家口）' },
+    { id: 'cn-huhehaote', name: '华北5（呼和浩特）' },
+    { id: 'cn-wulanchabu', name: '华北6（乌兰察布）' },
+    { id: 'cn-shenzhen', name: '华南1（深圳）' },
+    { id: 'cn-heyuan', name: '华南2（河源）' },
+    { id: 'cn-guangzhou', name: '华南3（广州）' },
+    { id: 'cn-chengdu', name: '西南1（成都）' }
 ];
 
 window.createDefaultAccount = () => ({
