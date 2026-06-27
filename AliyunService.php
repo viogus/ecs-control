@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use AlibabaCloud\Client\AlibabaCloud;
-use AlibabaCloud\Client\Exception\ClientException;
 use AlibabaCloud\Client\Exception\ServerException;
 
 class AliyunService
