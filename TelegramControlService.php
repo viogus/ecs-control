@@ -637,14 +637,4 @@ class TelegramControlService
         $stmt->execute([$key, $value]);
     }
 
-
-
-
-
-
-
-
-
-
-
 }

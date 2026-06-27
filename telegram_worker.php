@@ -15,11 +15,18 @@ $configManager = $app->getConfigManager();
 
 $service = new TelegramControlService($db, $configManager, $app);
 
-while (true) {
+$shutdown = false;
+$handleSignal = function (int $signo) use (&$shutdown) {
+    $shutdown = true;
+};
+pcntl_signal(SIGTERM, $handleSignal);
+pcntl_signal(SIGINT, $handleSignal);
+
+while (!$shutdown) {
     try {
         $processed = $service->processUpdatesWithTimeout(20);
         if ($processed === 0) {
-            sleep(30); // 未配置或无新消息时低频等待
+            sleep(5); // 未配置或无新消息时低频等待
         }
     } catch (\Throwable $e) {
         $db->addLog('error', 'Telegram 控制常驻进程异常: ' . strip_tags($e->getMessage()));
