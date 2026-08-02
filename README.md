@@ -21,6 +21,9 @@ A lightweight controller for cloud server monitoring, traffic control, quota pro
 
 ## 🆕 最近更新
 
+- **新增实例公网 IPv6 分配/释放**：支持为实例一键分配公网 IPv6 地址（自动开通 VPC/交换机 IPv6 与 IPv6 网关，按量计费带宽），已分配实例可直接释放。
+- **安全强化**：配置导出默认脱敏（完整备份需密码验证）、安装令牌（SETUP_TOKEN）防抢占初始化、敏感凭证入库加密（sodium / APP_ENC_KEY）。
+- **稳定性**：定时任务互斥锁防并发重复停机、通知告警去重冷却、CDT/费用查询失败自动退避。
 - **新增 Cloudflare Workers 部署方式**：支持将控制面板部署在 Cloudflare 边缘节点，完全无服务器化。详细说明见下方"方式二"。
 - 新增页面 Logo 自定义，支持本地上传或填写图片地址。
 - 优化一键创建 ECS：支持公网 IP 类型、硬盘类型、系统盘大小校验与更换公网 IP。
@@ -221,6 +224,7 @@ cdt:ListCdtInternetTraffic
 - **预检与成本预览**：创建前自动调用阿里云 API 进行库存预检与其费用估算，拒绝盲目下单。
 - **初次登录信息保护**：针对新建实例，系统仅在创建成功的瞬间展示初始密码，确保 AK/SK 与凭据安全。
 - **DDNS 联动**：深度集成 **Cloudflare**，实例重启 IP 变更后自动同步 A 记录。
+- **IPv6 公网地址**：支持为实例一键分配/释放公网 IPv6 地址（阿里云无 IPv6 EIP，走 VPC IPv6 网关路径），首次分配自动开通 VPC/交换机 IPv6 与 IPv6 网关，公网带宽按量计费（默认 5 Mbps）。
 
 ### 📊 成本与审计
 - **费用中心**：实时拉取账号 **可用余额**，并预估当月实例已产生账单金额。
@@ -309,6 +313,8 @@ cdt:ListCdtInternetTraffic
 - **敏感配置加密**：账号 AK Secret、SMTP 密码、Telegram Token、Cloudflare Token、monitor_key 入库前
   使用 sodium 加密（`data/.secret_encryption.key` 或环境变量 `APP_ENC_KEY`）。备份时请同时备份密钥文件。
 - **导出保护**：配置导出默认脱敏；完整备份（含敏感凭证）需验证管理员密码。
+- **IPv6 计费**：实例分配公网 IPv6 走 IPv6 网关路径，公网带宽按量计费（PayByTraffic），
+  需账号开通 CDT 且地域支持 IPv6 特性；释放实例前请先在面板释放 IPv6，避免带宽持续计费。
 
 ---
 

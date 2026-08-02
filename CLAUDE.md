@@ -57,7 +57,7 @@ There is no `api/` directory. All routing is via `index.php?action=xxx` with a f
 | `AppContainer` | Dependency Injection container, central bootstrap, exposes service getters |
 | `HttpRouter` | Entry point, router, session/auth, action dispatch |
 | `MonitorService` | Cron monitoring loop: traffic check, circuit breaker, schedules, keepalive, DDNS |
-| `InstanceActionService` (447 lines) | Instance CRUD: start/stop/delete/replace-IP/refresh/release queue |
+| `InstanceActionService` (563 lines) | Instance CRUD: start/stop/delete/replace-IP/refresh/release queue, IPv6 allocate/release |
 | `FrontendResponseBuilder` (445 lines) | DTO building: instance snapshots, config/status for frontend, billing metrics |
 | `Account` (179 lines) | Immutable value object wrapping DB row (not yet wired into consumers) |
 
@@ -65,7 +65,7 @@ There is no `api/` directory. All routing is via `index.php?action=xxx` with a f
 
 | Class | Role |
 |---|---|
-| `AliyunService` (2086 lines) | Alibaba Cloud SDK wrapper: ECS, VPC, EIP, BSS, CDT, CloudMonitor APIs |
+| `AliyunService` (1152 lines) | Alibaba Cloud SDK wrapper: ECS, VPC, EIP, IPv6 gateway, BSS, CDT, CloudMonitor APIs |
 | `ConfigManager` (1097 lines) | Settings CRUD, account groups, encryption (sodium), schema migration |
 | `Database` (629 lines) | SQLite connection, schema init, migrations, log/stats queries |
 | `NotificationService` (486 lines) | Email (PHPMailer), Telegram Bot API, Webhook dispatcher |
@@ -76,6 +76,15 @@ There is no `api/` directory. All routing is via `index.php?action=xxx` with a f
 
 - **crond** (Alpine dcron): `/etc/crontabs/root` runs `monitor.php` every minute. Must `cd /var/www/html` first (dcron CWD is `/var/www`). dcron skips nologin users, so use root crontab.
 - **telegram_worker.php**: Long-polling loop with `sleep(30)` when idle. Started as background process in `entrypoint.sh`.
+
+### Security & Reliability Mechanisms
+
+- **monitor 互斥锁**: `monitor.php` acquires a non-blocking flock on `data/monitor.lock`; if the previous run is still in progress the round is skipped (prevents duplicate stop/notify/DDNS).
+- **Setup 安装令牌**: before initialization, `ConfigManager::getSetupToken()` generates a one-time `SETUP_TOKEN` printed in container logs (`docker logs ... | grep SETUP_TOKEN`); `handleSetup` validates it to prevent hijacking.
+- **敏感配置加密**: `ConfigManager::SENSITIVE_SETTING_KEYS` (notify_password, notify_tg_token, notify_tg_proxy_pass, ddns_cf_token, notify_wh_url, monitor_key) are sodium-encrypted at rest; `get()`/`getAllSettings()` auto-decrypt. Encryption key: `data/.secret_encryption.key` file, or `APP_ENC_KEY` env (64-hex) — file key wins when both exist (backward compatible).
+- **导出保护**: `action=export` defaults to redacted output; full backup requires `full=1` + admin password re-auth.
+- **告警去重**: `MonitorService::notifyTrafficWarningWithCooldown` dedupes traffic alerts per account per billing month (1h cooldown); `AccountRefresher` writes failure cooldown keys (`cdt_failure_at_*`) so failed CDT queries back off 5 min.
+- **IPv6**: no IPv6 EIP on Alibaba Cloud — public IPv6 goes through the VPC IPv6 gateway path (`AliyunService::enableVpcIpv6` → `enableVSwitchIpv6` → `ensureIpv6Gateway` → `assignIpv6Address` → `allocateIpv6InternetBandwidth`, PayByTraffic). `InstanceActionService::allocateIpv6/releaseIpv6` orchestrate with an atomic in-flight lock (`ipv6_allocating_{id}` in settings, 10 min expiry) and cloud-side idempotent recovery.
 
 ### Frontend
 
