@@ -173,25 +173,28 @@ class EcsCreateService
 
     private function detectClientPublicIp()
     {
-        // Trust proxy headers only when REMOTE_ADDR is a private/loopback IP (reverse proxy)
+        // 仅当 REMOTE_ADDR 是私有/回环地址(确认在反向代理后)才信任代理头;
+        // 直连公网访问时 REMOTE_ADDR 即客户端 IP,不信任任何可伪造的转发头
         $remote = $_SERVER['REMOTE_ADDR'] ?? '';
-        $fromProxy = !filter_var($remote, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
+        $isPrivateRemote = !filter_var($remote, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
             || in_array($remote, ['127.0.0.1', '::1'], true);
 
-        $candidates = [];
-        if ($fromProxy && !empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
-            $candidates[] = trim((string) $_SERVER['HTTP_CF_CONNECTING_IP']);
-        }
-        foreach (['HTTP_X_REAL_IP', 'REMOTE_ADDR'] as $key) {
-            if (!empty($_SERVER[$key])) {
-                $candidates[] = trim((string) $_SERVER[$key]);
+        if (!$isPrivateRemote) {
+            // 直连公网访问:REMOTE_ADDR 即客户端 IP(IPv4/IPv6 均可),不信任任何伪造头
+            $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
+            if (filter_var($remote, FILTER_VALIDATE_IP, $flags)) {
+                return $remote;
             }
+            return '';
         }
 
-        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            foreach (explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']) as $item) {
-                $candidates[] = trim($item);
-            }
+        // 代理场景:仅信任代理实际写入的 X-Real-IP / CF-Connecting-IP,不信任可伪造的 X-Forwarded-For
+        $candidates = [];
+        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            $candidates[] = trim((string) $_SERVER['HTTP_CF_CONNECTING_IP']);
+        }
+        if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+            $candidates[] = trim((string) $_SERVER['HTTP_X_REAL_IP']);
         }
 
         foreach ($candidates as $ip) {

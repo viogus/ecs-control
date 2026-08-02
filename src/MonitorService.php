@@ -45,7 +45,14 @@ class MonitorService
         $accounts = $this->configManager->getAccounts();
 
         foreach ($accounts as $account) {
-            $this->processAccount($account, $currentTime, $threshold, $shutdownMode, $thresholdAction, $keepAlive, $monthlyAutoStart, $userInterval, $logs);
+            // 逐账号隔离异常:单个账号失败不中断整轮(后续账号、释放队列、Telegram 仍会执行)
+            try {
+                $this->processAccount($account, $currentTime, $threshold, $shutdownMode, $thresholdAction, $keepAlive, $monthlyAutoStart, $userInterval, $logs);
+            } catch (\Throwable $e) {
+                $label = Helpers::getAccountLogLabel($account);
+                $logs[] = "[异常] 账号巡检失败 [{$label}]: " . strip_tags($e->getMessage());
+                $this->db->addLog('error', "账号巡检异常 [{$label}]: " . strip_tags($e->getMessage()));
+            }
         }
 
         $this->configManager->updateLastRunTime(time());
@@ -78,6 +85,32 @@ class MonitorService
         Helpers::logNotificationResult($this->db, $result, $accountLabel);
     }
 
+    /**
+     * 带冷却的流量告警:同一账号同账单月内重复触发(停机失败/notify_only)时,
+     * 每轮 cron 只发一次通知,冷却期内静默跳过,避免刷屏与重复通知。
+     */
+    private function notifyTrafficWarningWithCooldown($account, $traffic, $percent, $actionText, $threshold, int $currentTime): void
+    {
+        $accountId = (int) ($account->id ?? 0);
+        $keySuffix = $accountId > 0
+            ? (string) $accountId
+            : md5(($account->accessKeyId ?? '') . '|' . ($account->instanceId ?? ''));
+        $key = 'traffic_alert_' . $keySuffix . '_' . date('Y-m', $currentTime);
+
+        $stmt = $this->db->getPdo()->prepare("SELECT value FROM settings WHERE key = ? LIMIT 1");
+        $stmt->execute([$key]);
+        $lastSent = (int) $stmt->fetchColumn();
+        if ($lastSent > 0 && ($currentTime - $lastSent) < 3600) {
+            return;
+        }
+
+        $res = $this->notificationService->sendTrafficWarning($account->accessKeyId, $traffic, $percent, $actionText, $threshold);
+        Helpers::logNotificationResult($this->db, $res, Helpers::getAccountLogLabel($account));
+        $this->db->getPdo()
+            ->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+            ->execute([$key, (string) $currentTime]);
+    }
+
     private function isRecentlyCreatedInstance($account)
     {
         $instanceId = trim((string) ($account->instanceId ?? ''));
@@ -98,6 +131,7 @@ class MonitorService
             $updatedAt = (int) $stmt->fetchColumn();
             return $updatedAt > 0 && (time() - $updatedAt) < 900;
         } catch (Exception $e) {
+            $this->db->addLog('warning', '新建实例判定查询失败: ' . strip_tags($e->getMessage()));
             return false;
         }
     }
@@ -118,13 +152,29 @@ class MonitorService
 
         $targetMinutes = $this->timeToMinutes($targetTime);
         $currentMinutes = (int) date('G', $currentTime) * 60 + (int) date('i', $currentTime);
-        return abs($currentMinutes - $targetMinutes) <= 5;
+        // 目标时间已到且当天未执行过:不提前执行;
+        // 60 分钟宽限窗口内补执行(cron 错过整点仍可执行),超窗后当天不再触发,
+        // 避免目标时间设为 00:xx 时一整天任意时刻都被误触发
+        $minutesSinceTarget = $currentMinutes - $targetMinutes;
+        return $minutesSinceTarget >= 0 && $minutesSinceTarget <= 60;
     }
 
     private function timeToMinutes($hhmm)
     {
         $parts = explode(':', $hhmm);
         return (int) $parts[0] * 60 + (int) $parts[1];
+    }
+
+    /**
+     * CDT 失败标记的 key 后缀:优先账号 id,缺省时用 AK+实例的哈希,与 AccountRefresher 保持一致。
+     */
+    private function cdtFailureKeySuffix($account): string
+    {
+        $accountId = (int) ($account->id ?? 0);
+        if ($accountId > 0) {
+            return (string) $accountId;
+        }
+        return md5(($account->accessKeyId ?? '') . '|' . ($account->instanceId ?? ''));
     }
 
 
@@ -143,43 +193,6 @@ class MonitorService
         $stmt = $pdo->prepare("SELECT COALESCE(SUM(traffic_used), 0) FROM accounts WHERE access_key_id = ? AND region_id = ? AND traffic_billing_month = ?");
         $stmt->execute([$account->accessKeyId ?? '', $account->regionId ?? '', $billingMonth]);
         return (float) $stmt->fetchColumn();
-    }
-
-    private function getMeteredOutboundTraffic($account)
-    {
-        if (empty($account->id) || empty($account->instanceId)) {
-            throw new Exception('缺少账号 ID 或 Instance ID，无法按实例统计公网出口流量');
-        }
-
-        $billingMonth = date('Y-m');
-        $monthStartMs = strtotime($billingMonth . '-01 00:00:00') * 1000;
-        $record = $this->db->getInstanceTrafficUsage($account->id, $account->instanceId, $billingMonth);
-
-        $trafficBytes = $record ? (float) ($record['traffic_bytes'] ?? 0) : 0.0;
-        $lastSampleMs = $record ? (int) ($record['last_sample_ms'] ?? 0) : 0;
-        if ($lastSampleMs < $monthStartMs) {
-            $lastSampleMs = $monthStartMs;
-            $trafficBytes = 0.0;
-        }
-
-        $safeEndSeconds = max(strtotime($billingMonth . '-01 00:00:00'), time() - 90);
-        $endMs = (int) (floor($safeEndSeconds / 60) * 60 * 1000);
-
-        if ($endMs > $lastSampleMs) {
-            $delta = $this->aliyunService->getInstanceOutboundTrafficDelta($account, $lastSampleMs, $endMs);
-            $trafficBytes += (float) ($delta['bytes'] ?? 0);
-            $lastSampleMs = max($lastSampleMs, (int) ($delta['lastSampleMs'] ?? $lastSampleMs));
-        }
-
-        $this->db->upsertInstanceTrafficUsage(
-            (int) $account->id,
-            $account->instanceId,
-            $billingMonth,
-            $trafficBytes,
-            $lastSampleMs
-        );
-
-        return $trafficBytes / 1024 / 1024 / 1024;
     }
 
     private function safeControlInstance($account, string $action, $shutdownMode = 'KeepCharging')
@@ -221,7 +234,7 @@ class MonitorService
         $this->handleAdaptiveHeartbeat($account, $currentTime, $userInterval, $s);
 
         // 2. 流量熔断
-        $s['requiresTrafficProtection'] = $this->handleTrafficCircuitBreaker($account, $currentTime, $threshold, $shutdownMode, $thresholdAction, $s);
+        $s['requiresTrafficProtection'] = $this->handleTrafficCircuitBreaker($account, $currentTime, $threshold, $shutdownMode, $thresholdAction, $s, $userInterval);
 
         // 2b. 费用熔断
         $this->handleCostCircuitBreaker($account, $currentTime, $shutdownMode, $s);
@@ -306,8 +319,24 @@ class MonitorService
 
     // ---- Phase 2: 流量熔断 ----
 
-    private function handleTrafficCircuitBreaker($account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, array &$s): bool
+    private function handleTrafficCircuitBreaker($account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, array &$s, int $userInterval = 600): bool
     {
+        // 数据新鲜度保护:CDT 持续失败超过 15 分钟时,基于陈旧数据熔断可能误停/反复告警,跳过本轮
+        $stmt = $this->db->getPdo()->prepare("SELECT value FROM settings WHERE key = ?");
+        $stmt->execute(['cdt_failure_at_' . $this->cdtFailureKeySuffix($account)]);
+        $cdtFailureAt = (int) $stmt->fetchColumn();
+        if ($cdtFailureAt > 0 && ($currentTime - $cdtFailureAt) > 900) {
+            $s['apiStatusLog'] .= " [流量数据持续异常" . ($currentTime - $cdtFailureAt) . "s,跳过熔断]";
+            return false;
+        }
+        // AccountRefresher 完全未运行时(updatedAt 停滞)的兜底
+        $dataAge = $currentTime - (int) ($account->updatedAt ?? 0);
+        $maxDataAge = max(1200, $userInterval * 2);
+        if ($dataAge > $maxDataAge) {
+            $s['apiStatusLog'] .= " [流量数据过期{$dataAge}s,跳过熔断]";
+            return false;
+        }
+
         $maxTraffic = $account->maxTraffic;
         $accountTraffic = $this->getGroupTrafficUsed($account);
         $usagePercent = ($maxTraffic > 0) ? round(($accountTraffic / $maxTraffic) * 100, 2) : 0;
@@ -339,7 +368,8 @@ class MonitorService
                     $s['apiStatusLog'] .= " [鉴权失效,已暂停自动停机]";
                 }
             } else {
-                $canAttemptStop = !in_array($s['status'], [InstanceStatus::Stopped->value, InstanceStatus::Stopping->value, InstanceStatus::Released->value], true);
+                // 排除过渡态(Starting/Pending):避免上一轮刚开机、状态尚未稳定时被熔断立即打断
+                $canAttemptStop = !in_array($s['status'], [InstanceStatus::Stopped->value, InstanceStatus::Stopping->value, InstanceStatus::Starting->value, InstanceStatus::Pending->value, InstanceStatus::Released->value], true);
                 if ($canAttemptStop) {
                     if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
                         $previousStatus = $s['status'];
@@ -358,15 +388,13 @@ class MonitorService
             }
 
             if (!empty($s['actions']) && !($s['protectionSuspended'] && $s['protectionSuspendReason'] === 'credential_invalid')) {
-                $mailRes = $this->notificationService->sendTrafficWarning($account->accessKeyId, $accountTraffic, $usagePercent, implode(',', $s['actions']), $threshold);
-                Helpers::logNotificationResult($this->db, $mailRes, $s['accountLabel']);
+                $this->notifyTrafficWarningWithCooldown($account, $accountTraffic, $usagePercent, implode(',', $s['actions']), $threshold, $currentTime);
             }
         } else {
             // notify_only mode — always dispatch notification
             $s['actions'][] = "超量提醒";
             $this->db->addLog('warning', "账号出口流量超限触发提醒 [{$s['accountLabel']}] 当前使用率:{$usagePercent}%");
-            $mailRes = $this->notificationService->sendTrafficWarning($account->accessKeyId, $accountTraffic, $usagePercent, '超量提醒', $threshold);
-            Helpers::logNotificationResult($this->db, $mailRes, $s['accountLabel']);
+            $this->notifyTrafficWarningWithCooldown($account, $accountTraffic, $usagePercent, '超量提醒', $threshold, $currentTime);
         }
 
         return true;
@@ -384,7 +412,8 @@ class MonitorService
         $threshold = (float) $this->configManager->get('cost_threshold', '0.48');
         if ($threshold <= 0) return false;
 
-        $canAttemptStop = !in_array($s['status'], [InstanceStatus::Stopped->value, InstanceStatus::Stopping->value, InstanceStatus::Released->value], true);
+        // 排除过渡态:避免对刚开机尚未稳定的实例直接下发停机
+        $canAttemptStop = !in_array($s['status'], [InstanceStatus::Stopped->value, InstanceStatus::Stopping->value, InstanceStatus::Starting->value, InstanceStatus::Pending->value, InstanceStatus::Released->value], true);
         if (!$canAttemptStop || $s['protectionSuspended']) return false;
         if ($this->isCostQueryInCooldown($account, $currentTime)) return false;
 
@@ -394,7 +423,9 @@ class MonitorService
                 $account->instanceId, date('Y-m'), $account->siteType ?? 'china'
             );
             $cost = (float) ($bill['TotalCost'] ?? 0);
-            $this->clearCostQueryFailureCooldown($account);
+            // 成功查询也设置冷却(10 分钟),避免每分钟对每个账号调用 BSS API 触发限流;
+            // 冷却 key 与失败共用一个,失败 300s / 成功 600s
+            $this->setCostQueryFailureCooldown($account, $currentTime + 600);
         } catch (\Exception $e) {
             $this->db->addLog('warning', "费用查询失败 [{$s['accountLabel']}]: " . strip_tags($e->getMessage()));
             $this->setCostQueryFailureCooldown($account, $currentTime + 300);
@@ -411,7 +442,7 @@ class MonitorService
                 $account->autoStartBlocked = true;
                 $this->configManager->updateScheduleBlockedByTrafficForGroup($s['accountGroupKey'], true);
                 $this->notifyStatusChangeIfNeeded($account, $previousStatus, InstanceStatus::Stopping->value, "当月费用 \${$cost} 超过阈值，已自动停机。");
-                $notifyRes = $this->notificationService->sendTrafficWarning($account->accessKeyId, $cost, ($cost / $threshold) * 100, '费用超限自动停机', (int) $threshold);
+                $notifyRes = $this->notificationService->sendCostWarning($account->accessKeyId, $cost, $threshold);
                 Helpers::logNotificationResult($this->db, $notifyRes, $s['accountLabel']);
                 $s['status'] = InstanceStatus::Stopping->value;
                 $s['scheduleBlockedByTraffic'] = true;
@@ -487,8 +518,12 @@ class MonitorService
                     $s['apiStatusLog'] .= " [定时停机失败]";
                 }
             } else {
-                $this->configManager->updateAutoStartBlocked($account->id, true);
-                $account->autoStartBlocked = true;
+                // 实例已停止或正处于过渡态:仅在过渡态(停机指令可能已发出)设置保活阻塞;
+                // 已停止的实例不设 block,否则未配置定时开机时保活会被永久阻塞
+                if ($s['status'] !== InstanceStatus::Stopped->value) {
+                    $this->configManager->updateAutoStartBlocked($account->id, true);
+                    $account->autoStartBlocked = true;
+                }
                 $this->configManager->updateScheduleExecutionState($account->id, 'stop', $today);
             }
         }

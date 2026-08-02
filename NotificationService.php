@@ -44,6 +44,20 @@ class NotificationService
         ], 'warning', $accessKeyId);
     }
 
+    /**
+     * 费用超限告警:金额与阈值保留两位小数展示,
+     * 避免复用流量告警时 (int) 强转把 0.48 显示成 0%。
+     */
+    public function sendCostWarning($accessKeyId, $cost, $threshold)
+    {
+        return $this->notify('费用告警 - 费用超限自动停机', '检测到当月费用超过设定阈值，实例已自动停机', [
+            ['label' => '账号', 'value' => substr($accessKeyId, 0, 7) . '***'],
+            ['label' => '当月费用', 'value' => '$' . number_format((float) $cost, 2), 'highlight' => true],
+            ['label' => '费用阈值', 'value' => '$' . number_format((float) $threshold, 2)],
+            ['label' => '当前状态', 'value' => '费用超限，已自动停机']
+        ], 'warning', $accessKeyId);
+    }
+
     public function notifyCredentialInvalid($accessKeyId, $traffic, $percentage, $threshold)
     {
         $trafficText = $this->formatTraffic((float) $traffic);
@@ -230,10 +244,12 @@ class NotificationService
         $rows = '';
         foreach ($details as $item) {
             $valColor = isset($item['highlight']) && $item['highlight'] ? $color : '#1C1C1E';
+            $label = $this->escHtml($item['label'] ?? '');
+            $value = $this->escHtml($item['value'] ?? '');
             $rows .= "
             <tr style='border-bottom: 1px solid #F2F2F7;'>
-                <td style='padding: 12px 0; color: #8E8E93; font-size: 14px; width: 40%;'>{$item['label']}</td>
-                <td style='padding: 12px 0; color: {$valColor}; font-size: 14px; font-weight: 600; text-align: right;'>{$item['value']}</td>
+                <td style='padding: 12px 0; color: #8E8E93; font-size: 14px; width: 40%;'>{$label}</td>
+                <td style='padding: 12px 0; color: {$valColor}; font-size: 14px; font-weight: 600; text-align: right;'>{$value}</td>
             </tr>";
         }
 
@@ -248,8 +264,8 @@ class NotificationService
                         <tr><td style='height: 6px; background-color: {$color};'></td></tr>
                         <tr><td style='padding: 40px 30px;'>
                             <div style='color: {$color}; font-size: 12px; font-weight: 700; margin-bottom: 8px;'>ECS 服务器管家</div>
-                            <h1 style='margin: 0 0 10px 0; font-size: 24px; color: #1C1C1E;'>{$title}</h1>
-                            <p style='margin: 0 0 30px 0; font-size: 15px; color: #8E8E93;'>{$summary}</p>
+                            <h1 style='margin: 0 0 10px 0; font-size: 24px; color: #1C1C1E;'>{$this->escHtml($title)}</h1>
+                            <p style='margin: 0 0 30px 0; font-size: 15px; color: #8E8E93;'>{$this->escHtml($summary)}</p>
                             <table width='100%' border='0' cellspacing='0' cellpadding='0' style='border-top: 1px solid #F2F2F7;'>{$rows}</table>
                         </td></tr>
                         <tr><td style='background-color: #FAFAFC; padding: 20px; text-align: center; color: #AEAEB2; font-size: 12px;'>&copy; " . date('Y') . " ECS 服务器管家</td></tr>
@@ -259,6 +275,15 @@ class NotificationService
         </body></html>";
     }
 
+    /**
+     * 邮件模板 HTML 转义:实例备注/名称等用户可控字段可能包含恶意 HTML,
+     * 直接嵌入会被邮件客户端渲染,造成存储型注入。
+     */
+    private function escHtml($value): string
+    {
+        return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+    }
+
     private function sendMail($to, $name, $subject, $body)
     {
         $mail = new PHPMailer();
@@ -266,6 +291,9 @@ class NotificationService
         $mail->IsSMTP();
         $mail->SMTPDebug = 0;
         $mail->SMTPAuth = true;
+        // 显式设置超时:默认 300s 会导致 SMTP 不可达时同步阻塞主循环最长 5 分钟
+        $mail->Timeout = 15;
+        $mail->SMTPConnectTimeout = 10;
 
         $secure = $this->config['notify_secure'] ?? 'ssl';
         if (!empty($secure)) {
@@ -305,6 +333,10 @@ class NotificationService
         $url = "https://api.telegram.org/bot{$token}/sendMessage";
         if ($proxyType === 'custom' && !empty($overrideConfig['proxy_url'] ?? $this->config['notify_tg_proxy_url'] ?? '')) {
             $baseUrl = rtrim($overrideConfig['proxy_url'] ?? $this->config['notify_tg_proxy_url'], '/');
+            // SSRF 防护:拒绝自定义代理指向内网/保留地址
+            if (!$this->isExternalUrl($baseUrl)) {
+                return "自定义代理地址指向内网地址，已拒绝请求";
+            }
             $url = "{$baseUrl}/bot{$token}/sendMessage";
         }
 

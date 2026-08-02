@@ -47,6 +47,11 @@ services:
     environment:
       - PORT=${PORT:-43210}
       - TZ=Asia/Shanghai
+      # 可选：加密密钥(64 位 hex)。设置后敏感配置(账号 AK Secret、SMTP 密码、
+      # Telegram Token、Cloudflare Token)以该密钥加密，密钥不再落盘 data 目录。
+      # 注意：仅对全新部署生效；已有部署请勿设置，否则密钥不一致会导致已加密数据无法解密。
+      # 生成方式: openssl rand -hex 32
+      # - APP_ENC_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 2. **启动服务**：
@@ -54,6 +59,10 @@ services:
 docker-compose up -d
 ```
 访问 `http://localhost:43210` 即可开始使用。如需自定义端口，设置环境变量 `PORT` 即可，例如 `PORT=8080 docker-compose up -d`。
+
+> **首次初始化**：为防止他人抢先初始化，首次打开页面需输入**安装令牌（SETUP_TOKEN）**。
+> 令牌在容器启动时打印到日志中，执行 `docker logs ecs-control 2>&1 | grep SETUP_TOKEN` 获取，
+> 初始化完成后令牌即失效。
 
 ### 方式二：Cloudflare Workers (无服务器)
 
@@ -287,6 +296,19 @@ cdt:ListCdtInternetTraffic
 - **CF Worker 版**: TypeScript + Cloudflare D1 + AES-256-GCM 加密，无服务器部署。
 - **Frontend**: Vue 3.x (SFC 理念) + 原生 Vanilla CSS。
 - **SDK**: 阿里云 OpenAPI RPC 签名（PHP 版用官方 SDK，Worker 版自实现 HMAC-SHA1）。
+
+---
+
+## 🔐 安全须知
+
+- **一键创建 ECS 的安全组默认全开**（`0.0.0.0/0` 全端口全协议），因为实例公网出口 IP 无法提前预知。
+  请在使用后及时在阿里云控制台收紧安全组规则（仅保留 22/3389 与面板端口）。
+- **定时任务互斥**：monitor 每分钟由 cron 触发，已内置互斥锁；单轮超过 1 分钟时下一轮自动跳过，
+  不会重复停机或重复发通知。
+- **登录保护**：同一 IP 15 分钟内连续 5 次登录失败将锁定 15 分钟，失败次数越多延迟越长。
+- **敏感配置加密**：账号 AK Secret、SMTP 密码、Telegram Token、Cloudflare Token、monitor_key 入库前
+  使用 sodium 加密（`data/.secret_encryption.key` 或环境变量 `APP_ENC_KEY`）。备份时请同时备份密钥文件。
+- **导出保护**：配置导出默认脱敏；完整备份（含敏感凭证）需验证管理员密码。
 
 ---
 

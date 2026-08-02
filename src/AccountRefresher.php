@@ -79,15 +79,31 @@ class AccountRefresher
 
         if (!$trafficSuccess) {
             $traffic = $account->trafficUsed;
-            $newUpdateTime = $account->updatedAt;
+            // 失败也推进更新时间(保底 5 分钟冷却):
+            // 否则 shouldCheckApi 恒为 true,每分钟全量重试 CDT+状态接口,易触发阿里云限流
+            $newUpdateTime = max((int) $account->updatedAt, $currentTime - 300);
+            // 记录首次失败时间(供熔断层识别"持续失败",避免基于陈旧数据误停)
+            $failKey = 'cdt_failure_at_' . $this->cdtFailureKeySuffix($account);
+            $stmt = $this->db->getPdo()->prepare("SELECT value FROM settings WHERE key = ?");
+            $stmt->execute([$failKey]);
+            if ((int) $stmt->fetchColumn() <= 0) {
+                $this->db->getPdo()
+                    ->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+                    ->execute([$failKey, (string) $currentTime]);
+            }
         } else {
             $traffic = (float) ($trafficResult['value'] ?? 0);
             $this->db->addHourlyStat($account->id, $traffic);
             $this->db->addDailyStat($account->id, $traffic);
+            // 恢复成功:清除失败标记
+            $this->db->getPdo()
+                ->prepare("DELETE FROM settings WHERE key = ?")
+                ->execute(['cdt_failure_at_' . $this->cdtFailureKeySuffix($account)]);
         }
 
         if ($status === InstanceStatus::Unknown->value) {
-            $newUpdateTime = $account->updatedAt;
+            // 状态查询失败同样推进(保底 5 分钟),避免每分钟重试
+            $newUpdateTime = max((int) $account->updatedAt, $currentTime - 300);
         }
 
         if ($newUpdateTime <= 0) {
@@ -108,6 +124,18 @@ class AccountRefresher
             $this->db->addLog('warning', "实例状态查询失败 [" . Helpers::getAccountLogLabel($account) . "]: " . strip_tags($e->getMessage()));
             return InstanceStatus::Unknown->value;
         }
+    }
+
+    /**
+     * CDT 失败标记的 key 后缀:优先账号 id,缺省时用 AK+实例的哈希,避免公共 key 串扰。
+     */
+    private function cdtFailureKeySuffix(Account $account): string
+    {
+        $accountId = (int) $account->id;
+        if ($accountId > 0) {
+            return (string) $accountId;
+        }
+        return md5(($account->accessKeyId ?? '') . '|' . ($account->instanceId ?? ''));
     }
 
     private function isCredentialInvalidTrafficStatus($status): bool

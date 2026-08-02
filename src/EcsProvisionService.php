@@ -141,10 +141,18 @@ class EcsProvisionService
         $publicIpMode = ($preview['publicIpMode'] ?? 'ecs_public_ip') === 'eip' ? 'eip' : 'ecs_public_ip';
         $diskSize = $this->normalizeSystemDiskSize($preview['systemDisk']['size'] ?? 20, $preview['systemDisk'] ?? []);
         $lastError = null;
+        // 整体创建时间预算:多档带宽 × 磁盘类别重试最坏可达数十分钟,超时即终止
+        $startedAt = time();
+        $timeBudgetSeconds = 600;
 
         foreach ($bandwidthCandidates as $bandwidth) {
             foreach ($diskCategories as $diskCategory) {
+                if (time() - $startedAt > $timeBudgetSeconds) {
+                    throw new \Exception('ECS 创建超时（超过 10 分钟），请稍后重试或调整配置');
+                }
+                // 每轮重置,避免 runInstance 失败后误删上一轮已回滚的实例
                 $allocatedEip = null;
+                $instanceId = null;
                 try {
                     $this->emitProgress($progress, "创建 ECS（{$bandwidth} Mbps / {$diskCategory}）");
                     $instanceIds = $this->runInstance($key, $secret, $regionId, [
@@ -187,11 +195,16 @@ class EcsProvisionService
                     if ($allocatedEip && !empty($allocatedEip['allocationId'])) {
                         $this->releaseEipAddressSilently($key, $secret, $regionId, $allocatedEip['allocationId']);
                     }
+                    $orphanDeleted = true;
                     if (!empty($instanceId)) {
-                        $this->deleteOrphanedInstance($key, $secret, $regionId, $instanceId);
+                        $orphanDeleted = $this->deleteOrphanedInstance($key, $secret, $regionId, $instanceId);
                     }
                     $lastError = $e;
                     $message = $e->getMessage();
+                    if (!$orphanDeleted && !empty($instanceId)) {
+                        // 实例可能已创建但回滚删除失败:提示用户到控制台处理(密码不落库,引导重置)
+                        $message .= " 实例 {$instanceId} 可能已创建但清理失败，请到阿里云控制台检查并处理（可重置登录密码）。";
+                    }
                     if ($this->isDiskSizeError($message)) {
                         throw new \Exception("系统盘 {$diskSize} GB 不被当前镜像或实例规格支持，请手动调整系统盘大小后重新创建。阿里云返回：" . $message);
                     }
@@ -231,7 +244,8 @@ class EcsProvisionService
         }, 'describeInstanceType');
         $types = $result['InstanceTypes']['InstanceType'] ?? [];
         foreach ($types as $type) { if (($type['InstanceTypeId'] ?? '') === $instanceType) return $type; }
-        return $types[0] ?? [];
+        // 未匹配到目标规格时抛异常,避免静默取 $types[0] 导致 CPU 架构/规格错配选错镜像
+        throw new \Exception("当前区域 {$regionId} 未返回规格 {$instanceType} 的详情，请检查实例规格是否可用");
     }
 
     private function selectSystemImage($key, $secret, $regionId, $osKey, $cpuArchitecture = '')
@@ -639,7 +653,7 @@ class EcsProvisionService
         if (is_callable($progress)) $progress($step);
     }
 
-    private function deleteOrphanedInstance($key, $secret, $regionId, $instanceId): void
+    private function deleteOrphanedInstance($key, $secret, $regionId, $instanceId): bool
     {
         try {
             RetryHandler::execute(function () use ($key, $secret, $regionId, $instanceId) {
@@ -649,8 +663,10 @@ class EcsProvisionService
                     ->options(['query' => ['RegionId' => $regionId, 'InstanceId' => $instanceId, 'Force' => true], 'connect_timeout' => 10.0, 'timeout' => 25.0])
                     ->request();
             }, 'deleteOrphanedInstance');
+            return true;
         } catch (\Exception $e) {
             error_log("Failed to clean up orphaned instance [{$instanceId}]: " . $e->getMessage());
+            return false;
         }
     }
 }

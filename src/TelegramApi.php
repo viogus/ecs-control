@@ -9,12 +9,57 @@ class TelegramApi
         $this->settings = $settings;
     }
 
+    /**
+     * 常驻进程配置热更新:token/代理等修改后无需重启即可生效。
+     */
+    public function setSettings(array $settings): void
+    {
+        $this->settings = $settings;
+    }
+
+    /**
+     * 简单 SSRF 校验:解析主机并检查解析出的 IP 是否为公网地址。
+     */
+    private function isExternalUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if ($host === false || $host === null) {
+            return false;
+        }
+
+        $records = @dns_get_record($host, DNS_A | DNS_AAAA);
+        if (empty($records)) {
+            $ip = gethostbyname($host);
+            if ($ip === $host) {
+                return false;
+            }
+            $records = [['type' => 'A', 'ip' => $ip]];
+        }
+
+        foreach ($records as $record) {
+            $ip = $record['ip'] ?? $record['ipv6'] ?? null;
+            if ($ip === null) {
+                continue;
+            }
+            $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
+            if (filter_var($ip, FILTER_VALIDATE_IP, $flags) === false) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public function call(string $method, array $payload = []): array
     {
         $token = trim((string) ($this->settings['notify_tg_token'] ?? ''));
         $proxyType = $this->settings['notify_tg_proxy_type'] ?? 'none';
         $url = "https://api.telegram.org/bot{$token}/{$method}";
         if ($proxyType === 'custom' && !empty($this->settings['notify_tg_proxy_url'])) {
+            // SSRF 防护:拒绝自定义代理指向内网/保留地址
+            if (!$this->isExternalUrl($this->settings['notify_tg_proxy_url'])) {
+                return ['ok' => false, 'description' => '自定义代理地址指向内网地址，已拒绝请求'];
+            }
             $url = rtrim($this->settings['notify_tg_proxy_url'], '/') . "/bot{$token}/{$method}";
         }
 

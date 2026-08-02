@@ -138,9 +138,11 @@ function test_get_system_logs_masks_access_key_labels_and_formats_time(): void
 
     $logs = create_support_service($db, $config)->getSystemLogs('action');
 
-    assert_same_support(1, count($logs), 'action logs should include info/warning only');
+    // action 页口径与 clearSystemLogs 一致:包含 info/warning/error 三种级别
+    assert_same_support(2, count($logs), 'action logs should include info/warning/error');
     assert_same_support('started [AKID123***] and AKID123***', $logs[0]['message'], 'access key should be replaced with account label');
     assert_same_support('2023-11-14 22:13:20', $logs[0]['time_str'], 'log should include formatted timestamp');
+    assert_same_support('ignored error', $logs[1]['message'], 'error logs should be visible in action tab');
 }
 
 function test_clear_system_logs_reorders_ids_after_success(): void

@@ -127,9 +127,9 @@ class FrontendResponseBuilder
         return $config;
     }
 
-    public function getStatusForFrontend(bool $includeSensitive = false): array
+    public function getStatusForFrontend(bool $includeSensitive = false, bool $forceSync = false): array
     {
-        $this->configManager->syncAccountGroups();
+        $this->configManager->syncAccountGroups($forceSync);
 
         $data = [];
         $threshold = (int) $this->configManager->get('traffic_threshold', 95);
@@ -140,12 +140,12 @@ class FrontendResponseBuilder
         }));
 
         foreach ($accounts as $account) {
-            $data[] = $this->buildInstanceSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'billingEnabled' => $billingEnabled, 'includeSensitive' => $includeSensitive]);
+            $data[] = $this->buildInstanceSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'billingEnabled' => $billingEnabled, 'includeSensitive' => $includeSensitive, 'forceRefresh' => $forceSync]);
         }
 
         $pendingAccounts = $this->configManager->getPendingReleaseAccounts();
         foreach ($pendingAccounts as $account) {
-            $snap = $this->buildInstanceSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'billingEnabled' => $billingEnabled, 'includeSensitive' => $includeSensitive]);
+            $snap = $this->buildInstanceSnapshot($account, ['threshold' => $threshold, 'userInterval' => $userInterval, 'billingEnabled' => $billingEnabled, 'includeSensitive' => $includeSensitive, 'forceRefresh' => $forceSync]);
             $snap['instanceStatus'] = InstanceStatus::Releasing->value;
             $snap['status'] = InstanceStatus::Releasing->value;
             $snap['operationLocked'] = true;
@@ -253,6 +253,8 @@ class FrontendResponseBuilder
             'eipAddress' => $includeSensitive ? ($account['eip_address'] ?? '') : '',
             'eipManaged' => !empty($account['eip_managed']),
             'privateIp' => $includeSensitive ? ($account['private_ip'] ?? '') : '',
+            'ipv6Address' => $includeSensitive ? ($account['ipv6_address'] ?? '') : '',
+            'ipv6InternetBandwidthId' => $includeSensitive ? ($account['ipv6_internet_bandwidth_id'] ?? '') : '',
             'maxTraffic' => $maxTraffic,
             'siteType' => $account['site_type'] ?? 'international'
         ];
@@ -277,6 +279,8 @@ class FrontendResponseBuilder
     }
 
 
+    // ⚠ 计费缓存/查询逻辑与 InstanceActionService::refreshAccount 中内联实现重复,
+    // 修改其一必须同步另一处(balance/instance_bill 缓存 key、6 小时过期、异常降级)。
     private function safeGetBillingInfo($account, string $billingCycle): array
     {
         $costInfo = ['enabled' => true, 'monthly_cost' => null, 'balance' => null,

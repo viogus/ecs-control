@@ -4,6 +4,7 @@ require_once __DIR__ . '/../Database.php';
 require_once __DIR__ . '/../ConfigManager.php';
 require_once __DIR__ . '/../AliyunService.php';
 require_once __DIR__ . '/../src/Helpers.php';
+require_once __DIR__ . '/../src/AccountSyncService.php';
 require_once __DIR__ . '/../src/AccountRefresher.php';
 require_once __DIR__ . '/../src/Account.php';
 require_once __DIR__ . '/../src/InstanceStatus.php';
@@ -13,10 +14,19 @@ final class FakeRefresherDb extends Database
     public array $logs = [];
     public array $hourlyStats = [];
     public array $dailyStats = [];
+    private PDO $pdo;
 
     public function __construct()
     {
-        // skip parent — no SQLite file needed
+        // 内存 SQLite:支持 settings 表写入(CDT 失败标记等)
+        $this->pdo = new PDO('sqlite::memory:');
+        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)");
+    }
+
+    public function getPdo(): PDO
+    {
+        return $this->pdo;
     }
 
     public function addHourlyStat($accountId, $traffic): void
@@ -74,7 +84,8 @@ final class FakeRefresherConfig extends ConfigManager
         // skip parent — no DB needed
     }
 
-    public function updateAccountStatus($id, $traffic, $status, $updatedAt, array $metadata = []): bool
+    // 参数类型必须与父类 ConfigManager::updateAccountStatus 兼容(PHP 8.1 不允许子类收窄参数类型)
+    public function updateAccountStatus($id, $traffic, $status, $updatedAt, $metadata = []): bool
     {
         $this->statusUpdates[] = [
             'id' => $id, 'traffic' => $traffic, 'status' => $status,
@@ -146,7 +157,7 @@ function test_traffic_failure_preserves_old_values(): void
 {
     $db = new FakeRefresherDb();
     $aliyun = new FakeRefresherAliyun();
-    $aliyun->trafficException = new \Exception('CDT API timeout');
+    $aliyun->trafficException = new \Exception('cURL error: Operation timed out');
     $aliyun->status = 'Running';
     $config = new FakeRefresherConfig();
 
@@ -167,7 +178,9 @@ function test_traffic_failure_preserves_old_values(): void
     assert_refresher(3.7, $result->traffic, 'traffic should preserve old value on failure');
     assert_refresher('Running', $result->status, 'status should still be fetched');
     assert_refresher(false, $result->trafficSuccess, 'trafficSuccess should be false');
-    assert_refresher(500, $result->newUpdateTime, 'updateTime should be old when traffic fails');
+    // 失败冷却语义:失败时更新时间推进到 currentTime-300(5 分钟),
+    // 使 shouldCheckApi 在冷却期内不再触发,避免每分钟全量重试触发阿里云限流
+    assert_refresher(700, $result->newUpdateTime, 'updateTime should advance to failure cooldown when traffic fails');
     assert_refresher('timeout', $result->metadata['traffic_api_status'], 'status should reflect network error');
     assert_refresher(false, $result->authInvalid, 'timeout is not auth_error');
 

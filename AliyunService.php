@@ -269,6 +269,10 @@ class AliyunService
      */
     public function getInstanceStatus($account)
     {
+        if (empty($account->instanceId)) {
+            throw new \Exception("未配置 Instance ID");
+        }
+
         return RetryHandler::execute(function () use ($account) {
             AlibabaCloud::accessKeyClient($account->accessKeyId, $account->accessKeySecret)
                 ->regionId($account->regionId)
@@ -335,6 +339,10 @@ class AliyunService
                 ->request();
 
             $statusSet = $result['InstanceFullStatusSet']['InstanceFullStatus'][0] ?? null;
+            // 兼容:单元素时 SDK 可能返回关联数组而非列表
+            if (($statusSet['InstanceId'] ?? null) === null && isset($result['InstanceFullStatusSet']['InstanceFullStatus']['InstanceId'])) {
+                $statusSet = $result['InstanceFullStatusSet']['InstanceFullStatus'];
+            }
             if ($statusSet && ($statusSet['InstanceId'] ?? '') === $account->instanceId) {
                 return [
                     'status' => $statusSet['Status']['Name'] ?? InstanceStatus::Unknown->value,
@@ -357,7 +365,7 @@ class AliyunService
         }
 
         try {
-            return RetryHandler::execute(function () use ($account) {
+            return RetryHandler::execute(function () use ($account, $forceStop) {
                 AlibabaCloud::accessKeyClient($account->accessKeyId, $account->accessKeySecret)
                     ->regionId($account->regionId)
                     ->asDefaultClient();
@@ -373,7 +381,8 @@ class AliyunService
                         'query' => [
                             'RegionId' => $account->regionId,
                             'InstanceId' => $account->instanceId,
-                            'Force' => true,
+                            // 仅显式请求强制删除时才设 Force=true;队列流程先停后删,无需强制
+                            'Force' => $forceStop ? true : false,
                         ],
                         'connect_timeout' => 10.0,
                         'timeout' => 25.0
@@ -857,5 +866,287 @@ class AliyunService
         }
 
         throw new \Exception("EIP 状态等待超时: {$targetStatus} (最后观测状态: " . ($last['Status'] ?? 'null') . ")");
+    }
+
+    // ---- IPv6 management ----
+    // 公网 IPv6 路径(阿里云无 IPv6 EIP):VPC 开通 IPv6 → 交换机开通 IPv6 → IPv6 网关 →
+    // AssignIpv6Addresses 分配网卡地址 → AllocateIpv6InternetBandwidth 开通公网带宽。
+
+    /**
+     * 查询实例主网卡信息(NetworkInterfaceId/VpcId/VSwitchId),用于 IPv6 分配。
+     * @throws \Exception
+     */
+    public function getNetworkInterfaceInfo($account): array
+    {
+        if (empty($account->instanceId)) {
+            throw new \Exception("未配置 Instance ID");
+        }
+
+        $result = RetryHandler::execute(function () use ($account) {
+            $this->setDefaultClient($account->accessKeyId, $account->accessKeySecret, $account->regionId);
+            return AlibabaCloud::rpc()->product('Ecs')->scheme('https')->version('2014-05-26')
+                ->action('DescribeNetworkInterfaces')->method('POST')->host($this->ecsHost($account->regionId))
+                ->options(['query' => ['RegionId' => $account->regionId, 'InstanceId' => $account->instanceId], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                ->request();
+        }, 'getNetworkInterfaceInfo');
+
+        $interfaces = $result['NetworkInterfaceSets']['NetworkInterfaceSet'] ?? [];
+        foreach ($interfaces as $eni) {
+            if (($eni['Type'] ?? '') === 'Primary' || count($interfaces) === 1) {
+                return [
+                    'networkInterfaceId' => (string) ($eni['NetworkInterfaceId'] ?? ''),
+                    'vpcId' => (string) ($eni['VpcId'] ?? ''),
+                    'vswitchId' => (string) ($eni['VSwitchId'] ?? ''),
+                ];
+            }
+        }
+        throw new \Exception("未找到实例的主网卡信息 (ID: {$account->instanceId})");
+    }
+
+    /**
+     * VPC 开通 IPv6 网段(AssociateVpcCidrBlock,IpVersion=IPV6,不传 Ipv6CidrBlock 由系统自动分配)。
+     * 已开通时(错误码 Ipv6CidrBlockExisted)视为成功。
+     */
+    public function enableVpcIpv6($key, $secret, $regionId, $vpcId): void
+    {
+        if ($vpcId === '') {
+            throw new \Exception("缺少 VPC ID");
+        }
+        try {
+            RetryHandler::execute(function () use ($key, $secret, $regionId, $vpcId) {
+                $this->setDefaultClient($key, $secret, $regionId);
+                return AlibabaCloud::rpc()->product('Vpc')->scheme('https')->version('2016-04-28')
+                    ->action('AssociateVpcCidrBlock')->method('POST')->host($this->vpcHost($regionId))
+                    ->options(['query' => ['RegionId' => $regionId, 'VpcId' => $vpcId, 'IpVersion' => 'IPV6'], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                    ->request();
+            }, 'enableVpcIpv6');
+        } catch (\AlibabaCloud\Client\Exception\ServerException $e) {
+            $code = (string) $e->getErrorCode();
+            if (stripos($code, 'Ipv6CidrBlockExisted') !== false
+                || stripos($code, 'Ipv6CidrBlockExists') !== false) {
+                return; // VPC 已开通 IPv6(不同代际的错误码变体)
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 查询交换机是否已开通 IPv6(DescribeVSwitches 返回 Ipv6CidrBlock 即已开通)。
+     */
+    public function isVSwitchIpv6Enabled($key, $secret, $regionId, $vswitchId): bool
+    {
+        if ($vswitchId === '') {
+            return false;
+        }
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $vswitchId) {
+            $this->setDefaultClient($key, $secret, $regionId);
+            return AlibabaCloud::rpc()->product('Vpc')->scheme('https')->version('2016-04-28')
+                ->action('DescribeVSwitches')->method('POST')->host($this->vpcHost($regionId))
+                ->options(['query' => ['RegionId' => $regionId, 'VSwitchId' => $vswitchId], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                ->request();
+        }, 'isVSwitchIpv6Enabled');
+        $vswitches = $result['VSwitches']['VSwitch'] ?? [];
+        if (isset($vswitches['VSwitchId'])) {
+            $vswitches = [$vswitches];
+        }
+        foreach ($vswitches as $vsw) {
+            if (($vsw['VSwitchId'] ?? '') === $vswitchId && !empty($vsw['Ipv6CidrBlock'])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 交换机开通 IPv6(ModifyVSwitchAttribute:EnableIPv6=true + Ipv6CidrBlock 最后 8 位,十进制 0~255)。
+     * 先查询已开通则跳过,保证幂等;随机网段只在首次开通时使用。
+     */
+    public function enableVSwitchIpv6($key, $secret, $regionId, $vswitchId): void
+    {
+        if ($vswitchId === '') {
+            throw new \Exception("缺少 VSwitch ID");
+        }
+        if ($this->isVSwitchIpv6Enabled($key, $secret, $regionId, $vswitchId)) {
+            return; // 已开通,幂等跳过
+        }
+        try {
+            RetryHandler::execute(function () use ($key, $secret, $regionId, $vswitchId) {
+                $this->setDefaultClient($key, $secret, $regionId);
+                return AlibabaCloud::rpc()->product('Vpc')->scheme('https')->version('2016-04-28')
+                    ->action('ModifyVSwitchAttribute')->method('POST')->host($this->vpcHost($regionId))
+                    ->options(['query' => ['RegionId' => $regionId, 'VSwitchId' => $vswitchId, 'EnableIPv6' => true, 'Ipv6CidrBlock' => rand(0, 255)], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                    ->request();
+            }, 'enableVSwitchIpv6');
+        } catch (\AlibabaCloud\Client\Exception\ServerException $e) {
+            $code = (string) $e->getErrorCode();
+            if (stripos($code, 'Ipv6AlreadyEnabled') !== false) {
+                return; // 并发下其他请求已开通
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 确保 VPC 下存在 IPv6 网关(CreateIpv6Gateway)。已存在时返回空字符串,否则返回 Ipv6GatewayId。
+     */
+    public function ensureIpv6Gateway($key, $secret, $regionId, $vpcId, $name = 'ecs-control-ipv6gw'): string
+    {
+        if ($vpcId === '') {
+            throw new \Exception("缺少 VPC ID");
+        }
+        try {
+            $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $vpcId, $name) {
+                $this->setDefaultClient($key, $secret, $regionId);
+                return AlibabaCloud::rpc()->product('Vpc')->scheme('https')->version('2016-04-28')
+                    ->action('CreateIpv6Gateway')->method('POST')->host($this->vpcHost($regionId))
+                    ->options(['query' => ['RegionId' => $regionId, 'VpcId' => $vpcId, 'Name' => $name], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                    ->request();
+            }, 'ensureIpv6Gateway');
+            return (string) ($result['Ipv6GatewayId'] ?? '');
+        } catch (\AlibabaCloud\Client\Exception\ServerException $e) {
+            $code = (string) $e->getErrorCode();
+            if (stripos($code, 'OnlyOneIpv6GatewayInVpc') !== false) {
+                return ''; // 已存在 IPv6 网关
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 为实例主网卡分配一个 IPv6 地址(AssignIpv6Addresses),返回 IPv6 地址字符串。
+     * 前置:交换机已开通 IPv6。
+     */
+    public function assignIpv6Address($key, $secret, $regionId, $networkInterfaceId): string
+    {
+        if ($networkInterfaceId === '') {
+            throw new \Exception("缺少弹性网卡 ID");
+        }
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $networkInterfaceId) {
+            $this->setDefaultClient($key, $secret, $regionId);
+            return AlibabaCloud::rpc()->product('Ecs')->scheme('https')->version('2014-05-26')
+                ->action('AssignIpv6Addresses')->method('POST')->host($this->ecsHost($regionId))
+                ->options(['query' => ['RegionId' => $regionId, 'NetworkInterfaceId' => $networkInterfaceId, 'Ipv6AddressCount' => 1], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                ->request();
+        }, 'assignIpv6Address');
+        $addresses = $result['Ipv6Sets']['Ipv6Address'] ?? [];
+        $address = $addresses[0] ?? '';
+        if ($address === '') {
+            throw new \Exception('IPv6 地址分配成功但未返回地址');
+        }
+        return $address;
+    }
+
+    /**
+     * 查询实例已分配的 IPv6 地址列表(DescribeIpv6Addresses)。
+     * @return array<int, array{ipv6AddressId: string, ipv6Address: string, internetBandwidthId: string, status: string}>
+     */
+    public function describeIpv6Addresses($key, $secret, $regionId, $instanceId): array
+    {
+        if ($instanceId === '') {
+            return [];
+        }
+        $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $instanceId) {
+            $this->setDefaultClient($key, $secret, $regionId);
+            return AlibabaCloud::rpc()->product('Vpc')->scheme('https')->version('2016-04-28')
+                ->action('DescribeIpv6Addresses')->method('POST')->host($this->vpcHost($regionId))
+                ->options(['query' => ['RegionId' => $regionId, 'AssociatedInstanceId' => $instanceId, 'AssociatedInstanceType' => 'EcsInstance', 'PageSize' => 50], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                ->request();
+        }, 'describeIpv6Addresses');
+
+        $list = [];
+        $items = $result['Ipv6Addresses']['Ipv6Address'] ?? [];
+        if (isset($items['Ipv6AddressId'])) {
+            $items = [$items]; // 单元素时 SDK 可能返回关联数组
+        }
+        foreach ($items as $item) {
+            if (($item['AssociatedInstanceId'] ?? '') !== $instanceId) {
+                continue;
+            }
+            $list[] = [
+                'ipv6AddressId' => (string) ($item['Ipv6AddressId'] ?? ''),
+                'ipv6Address' => (string) ($item['Ipv6Address'] ?? ''),
+                'internetBandwidthId' => (string) (($item['Ipv6InternetBandwidth']['Ipv6InternetBandwidthId'] ?? '') ?: ($item['Ipv6InternetBandwidthId'] ?? '')),
+                'status' => (string) ($item['Status'] ?? ''),
+            ];
+        }
+        return $list;
+    }
+
+    /**
+     * 为 IPv6 地址开通公网带宽(AllocateIpv6InternetBandwidth,按流量计费)。
+     * @return array{internetBandwidthId: string, status: string} status: allocated|already_exists|failed
+     */
+    public function allocateIpv6InternetBandwidth($key, $secret, $regionId, $ipv6AddressId, $bandwidth = 5): array
+    {
+        if ($ipv6AddressId === '') {
+            throw new \Exception("缺少 IPv6 地址 ID");
+        }
+        try {
+            $result = RetryHandler::execute(function () use ($key, $secret, $regionId, $ipv6AddressId, $bandwidth) {
+                $this->setDefaultClient($key, $secret, $regionId);
+                return AlibabaCloud::rpc()->product('Vpc')->scheme('https')->version('2016-04-28')
+                    ->action('AllocateIpv6InternetBandwidth')->method('POST')->host($this->vpcHost($regionId))
+                    ->options(['query' => ['RegionId' => $regionId, 'Ipv6AddressId' => $ipv6AddressId, 'Bandwidth' => max(1, (int) $bandwidth), 'InternetChargeType' => 'PayByTraffic'], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                    ->request();
+            }, 'allocateIpv6InternetBandwidth');
+            $bandwidthId = (string) ($result['InternetBandwidthId'] ?? '');
+            return ['internetBandwidthId' => $bandwidthId, 'status' => $bandwidthId !== '' ? 'allocated' : 'failed'];
+        } catch (\AlibabaCloud\Client\Exception\ServerException $e) {
+            $code = (string) $e->getErrorCode();
+            if (stripos($code, 'InternetBandwidthAlreadyExisted') !== false) {
+                return ['internetBandwidthId' => '', 'status' => 'already_exists'];
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 释放 IPv6 公网带宽(ReleaseIpv6InternetBandwidth)。带宽不存在时视为成功。
+     */
+    public function releaseIpv6InternetBandwidth($key, $secret, $regionId, $internetBandwidthId): void
+    {
+        if ($internetBandwidthId === '') {
+            return;
+        }
+        try {
+            RetryHandler::execute(function () use ($key, $secret, $regionId, $internetBandwidthId) {
+                $this->setDefaultClient($key, $secret, $regionId);
+                return AlibabaCloud::rpc()->product('Vpc')->scheme('https')->version('2016-04-28')
+                    ->action('ReleaseIpv6InternetBandwidth')->method('POST')->host($this->vpcHost($regionId))
+                    ->options(['query' => ['RegionId' => $regionId, 'InternetBandwidthId' => $internetBandwidthId], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                    ->request();
+            }, 'releaseIpv6InternetBandwidth');
+        } catch (\AlibabaCloud\Client\Exception\ServerException $e) {
+            $code = (string) $e->getErrorCode();
+            if (stripos($code, 'InvalidIpv6Instance') !== false || stripos($code, 'ResourceNotFound') !== false) {
+                return;
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 回收弹性网卡上的 IPv6 地址(UnassignIpv6Addresses)。地址不存在时视为成功。
+     */
+    public function unassignIpv6Addresses($key, $secret, $regionId, $networkInterfaceId, $ipv6Address): void
+    {
+        if ($networkInterfaceId === '' || $ipv6Address === '') {
+            return;
+        }
+        try {
+            RetryHandler::execute(function () use ($key, $secret, $regionId, $networkInterfaceId, $ipv6Address) {
+                $this->setDefaultClient($key, $secret, $regionId);
+                return AlibabaCloud::rpc()->product('Ecs')->scheme('https')->version('2014-05-26')
+                    ->action('UnassignIpv6Addresses')->method('POST')->host($this->ecsHost($regionId))
+                    ->options(['query' => ['RegionId' => $regionId, 'NetworkInterfaceId' => $networkInterfaceId, 'Ipv6Address.1' => $ipv6Address], 'connect_timeout' => 10.0, 'timeout' => 20.0])
+                    ->request();
+            }, 'unassignIpv6Addresses');
+        } catch (\AlibabaCloud\Client\Exception\ServerException $e) {
+            $code = (string) $e->getErrorCode();
+            if (stripos($code, 'IpUnassigned') !== false) {
+                return;
+            }
+            throw $e;
+        }
     }
 }

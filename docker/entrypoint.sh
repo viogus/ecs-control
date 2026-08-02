@@ -9,7 +9,15 @@ if [ -d "/var/www/html/data" ]; then
     chown -R www-data:www-data /var/www/html/data
 fi
 
-# 2. 启动 Cron 服务 (后台运行)
+# 2. 系统未初始化时生成并打印一次性安装令牌 (setup 防抢占)
+php82 -r '
+require "/var/www/html/vendor/autoload.php";
+$c = new ConfigManager(new Database("/var/www/html/data/data.sqlite"));
+if ($c->isInitialized()) { exit(0); }
+echo "SETUP_TOKEN=" . $c->getSetupToken() . "\n";
+' 2>&1 || echo "WARNING: 无法生成 SETUP_TOKEN(系统可能已初始化,或数据库初始化异常,请检查 data 目录权限)"
+
+# 3. 启动 Cron 服务 (后台运行)
 # Alpine dcron：以 root 启动守护进程，任务按 /etc/crontabs/ 下文件名自动切到对应用户执行。
 crond -b -l 8
 echo "Cron daemon started."

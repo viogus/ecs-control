@@ -69,7 +69,8 @@ class AdminSupportService
         if ($tab === 'heartbeat') {
             $types = ['heartbeat'];
         } else {
-            $types = ['info', 'warning'];
+            // 与 clearSystemLogs 口径一致:action 页同时展示 error 级别
+            $types = ['info', 'warning', 'error'];
         }
 
         $logs = $this->db->getLogsByTypes($types, 20);

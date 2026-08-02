@@ -202,6 +202,15 @@ class Database
         $stmt->execute([$ip]);
     }
 
+    /**
+     * 删除超过窗口期的登录失败记录,防止 login_attempts 表无限膨胀。
+     */
+    public function deleteExpiredLoginAttempts($windowSeconds = 900)
+    {
+        $stmt = $this->pdo->prepare("DELETE FROM login_attempts WHERE attempt_time <= ?");
+        $stmt->execute([time() - $windowSeconds]);
+    }
+
     // --- 流量记录逻辑 ---
 
     public function addHourlyStat($accountId, $traffic)

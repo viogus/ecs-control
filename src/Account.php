@@ -20,6 +20,8 @@ class Account implements \ArrayAccess
         'traffic_api_status' => 'trafficApiStatus', 'traffic_api_message' => 'trafficApiMessage',
         'protection_suspended' => 'protectionSuspended', 'protection_suspend_reason' => 'protectionSuspendReason',
         'protection_suspend_notified_at' => 'protectionSuspendNotifiedAt',
+        'ipv6_address' => 'ipv6Address', 'ipv6_internet_bandwidth_id' => 'ipv6InternetBandwidthId',
+        'ipv6_gateway_id' => 'ipv6GatewayId',
     ];
 
     public int $id = 0;
@@ -65,6 +67,9 @@ class Account implements \ArrayAccess
     public bool $protectionSuspended = false;
     public string $protectionSuspendReason = '';
     public int $protectionSuspendNotifiedAt = 0;
+    public string $ipv6Address = '';
+    public string $ipv6InternetBandwidthId = '';
+    public string $ipv6GatewayId = '';
 
     public static function fromDbRow(array $row, ?string $decryptedSecret = null): self
     {
@@ -109,6 +114,9 @@ class Account implements \ArrayAccess
         $a->osName = (string) ($row['os_name'] ?? '');
         $a->trafficApiStatus = (string) ($row['traffic_api_status'] ?? 'ok');
         $a->trafficApiMessage = (string) ($row['traffic_api_message'] ?? '');
+        $a->ipv6Address = (string) ($row['ipv6_address'] ?? '');
+        $a->ipv6InternetBandwidthId = (string) ($row['ipv6_internet_bandwidth_id'] ?? '');
+        $a->ipv6GatewayId = (string) ($row['ipv6_gateway_id'] ?? '');
         $a->protectionSuspended = !empty($row['protection_suspended']);
         $a->protectionSuspendReason = (string) ($row['protection_suspend_reason'] ?? '');
         $a->protectionSuspendNotifiedAt = (int) ($row['protection_suspend_notified_at'] ?? 0);

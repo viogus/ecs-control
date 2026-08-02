@@ -89,4 +89,4 @@ Single `template.html` — Vue 3 loaded via CDN (`static/vue.global.prod.js`). C
 - **Aliyun SDK V1**: Do not upgrade to V2 without full audit
 - **Single container**: Web + cron + PHP all in one Docker container
 - **No new namespaces**: Current classes are global; maintain classmap autoloading pattern
-- **CSRF required**: All mutating endpoints need `X-CSRF-Token` header; list is in `$mutatingActions` array in index.php
+- **CSRF required**: All mutating endpoints need `X-CSRF-Token` header; list is in `$mutatingActions` array in src/HttpRouter.php (plus sync=true branches of get_status/get_all_instances)

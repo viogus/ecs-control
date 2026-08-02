@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/../src/Helpers.php';
+require_once __DIR__ . '/../src/AccountSyncService.php';
 require_once __DIR__ . '/../src/MonitorService.php';
 require_once __DIR__ . '/../src/Account.php';
 require_once __DIR__ . '/../src/InstanceStatus.php';

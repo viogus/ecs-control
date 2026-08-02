@@ -13,6 +13,15 @@ class DdnsService
         $this->configManager = $configManager;
     }
 
+    /**
+     * 配置热更新:与 NotificationService::setConfig 保持一致,
+     * 供常驻进程(telegram_worker)在配置保存后刷新,无需重启。
+     */
+    public function setConfig(array $config): void
+    {
+        $this->config = $config;
+    }
+
     public function isEnabled(): bool
     {
         return ($this->config['ddns_enabled'] ?? '0') === '1'

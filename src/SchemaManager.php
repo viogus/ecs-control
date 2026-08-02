@@ -79,6 +79,9 @@ class SchemaManager
         self::ensureColumn($pdo, 'accounts', 'protection_suspended', 'INTEGER DEFAULT 0');
         self::ensureColumn($pdo, 'accounts', 'protection_suspend_reason', "TEXT DEFAULT ''");
         self::ensureColumn($pdo, 'accounts', 'protection_suspend_notified_at', 'INTEGER DEFAULT 0');
+        self::ensureColumn($pdo, 'accounts', 'ipv6_address', "TEXT DEFAULT ''");
+        self::ensureColumn($pdo, 'accounts', 'ipv6_internet_bandwidth_id', "TEXT DEFAULT ''");
+        self::ensureColumn($pdo, 'accounts', 'ipv6_gateway_id', "TEXT DEFAULT ''");
         self::ensureColumn($pdo, 'ecs_create_tasks', 'public_ip_mode', "TEXT DEFAULT 'ecs_public_ip'");
         self::ensureColumn($pdo, 'ecs_create_tasks', 'eip_allocation_id', "TEXT DEFAULT ''");
         self::ensureColumn($pdo, 'ecs_create_tasks', 'eip_address', "TEXT DEFAULT ''");

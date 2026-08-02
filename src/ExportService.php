@@ -9,7 +9,11 @@ class ExportService
         $this->configManager = $configManager;
     }
 
-    public function export(bool $redact = false): array
+    /**
+     * 导出配置。默认脱敏(redact=true):不含 AccessKey Secret、SMTP 密码等敏感凭证;
+     * 完整明文导出由调用方显式传 redact=false 并自行完成密码二次认证。
+     */
+    public function export(bool $redact = true): array
     {
         $settings = $this->configManager->getAllSettings();
         $accounts = $this->configManager->getAccounts();
@@ -38,6 +42,9 @@ class ExportService
                 'cpu' => (int)($acc['cpu'] ?? 0),
                 'memory' => (int)($acc['memory'] ?? 0),
                 'os_name' => $acc['os_name'] ?? '',
+                'ipv6_address' => $acc['ipv6_address'] ?? '',
+                'ipv6_internet_bandwidth_id' => $acc['ipv6_internet_bandwidth_id'] ?? '',
+                'ipv6_gateway_id' => $acc['ipv6_gateway_id'] ?? '',
                 'schedule_enabled' => !empty($acc['schedule_enabled']),
                 'schedule_start_enabled' => !empty($acc['schedule_start_enabled']),
                 'schedule_stop_enabled' => !empty($acc['schedule_stop_enabled']),
@@ -121,7 +128,7 @@ class ExportService
                 'tg_token' => $mask ?? $settings['notify_tg_token'] ?? '',
                 'tg_chat_id' => $settings['notify_tg_chat_id'] ?? '',
                 'wh_enabled' => ($settings['notify_wh_enabled'] ?? '0') === '1',
-                'wh_url' => $settings['notify_wh_url'] ?? '',
+                'wh_url' => $mask !== null ? $this->maskWebhookUrl($settings['notify_wh_url'] ?? '') : ($settings['notify_wh_url'] ?? ''),
                 'wh_method' => $settings['notify_wh_method'] ?? 'GET',
                 'wh_body' => $settings['notify_wh_body'] ?? '',
             ],
@@ -135,5 +142,23 @@ class ExportService
             'accounts' => $decrypted,
             'account_groups' => $groups,
         ];
+    }
+
+    /**
+     * 脱敏 webhook URL:仅保留 scheme + host,隐藏 path/query(可能含鉴权 token)。
+     */
+    private function maskWebhookUrl(string $url): string
+    {
+        if ($url === '') {
+            return '';
+        }
+        $parts = parse_url($url);
+        if ($parts === false || empty($parts['host'])) {
+            return '***';
+        }
+        $scheme = $parts['scheme'] ?? 'https';
+        $host = $parts['host'];
+        $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+        return "{$scheme}://{$host}{$port}/***";
     }
 }

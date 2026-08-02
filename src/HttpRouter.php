@@ -27,6 +27,8 @@ class HttpRouter
         'control_instance',
         'delete_instance',
         'replace_instance_ip',
+        'allocate_ipv6',
+        'release_ipv6',
         'logout',
         'export',
     ];
@@ -53,21 +55,46 @@ class HttpRouter
 
         if (in_array($action, $this->mutatingActions, true)) {
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-                error_log(sprintf('CSRF: method not POST for action=%s ip=%s', $action, $this->request->getClientIp()));
+                $this->logSecurityEvent('CSRF: method not POST', $action);
                 $this->json(['error' => 'Method not allowed'], 405);
                 return;
             }
             if (!$this->requireCsrf()) {
-                error_log(sprintf('CSRF: token mismatch for action=%s ip=%s', $action, $this->request->getClientIp()));
+                $this->logSecurityEvent('CSRF: token mismatch', $action);
                 return;
             }
         }
 
-        if ($this->dispatchAuthenticated($action)) {
+        try {
+            if ($this->dispatchAuthenticated($action)) {
+                return;
+            }
+        } catch (\Throwable $e) {
+            // 统一兜底:未捕获异常返回 JSON 错误而非 500 空白页,并记录日志
+            $this->app->getDb()->addLog('error', "请求处理异常 [{$action}]: " . strip_tags($e->getMessage()));
+            $this->json(['error' => '服务器内部错误，请查看日志'], 500);
             return;
         }
 
         echo $this->app->renderTemplate();
+    }
+
+    /**
+     * 安全事件(CSRF 拒绝等)记录到 PHP 错误日志与数据库日志表,
+     * 数据库不可用时静默降级,不阻断请求。
+     */
+    private function logSecurityEvent(string $message, string $action): void
+    {
+        $detail = sprintf('%s [action=%s ip=%s]', $message, $action, $this->request->getClientIp());
+        error_log($detail);
+        try {
+            $db = $this->app->getDb();
+            if ($db) {
+                $db->addLog('warning', $detail);
+            }
+        } catch (\Throwable $e) {
+            // 数据库不可用时仅保留 PHP 错误日志
+        }
     }
 
     public function json(array $payload, int $status = 200, int $flags = 0, bool $withCharset = false): void
@@ -175,6 +202,7 @@ class HttpRouter
             return true;
         }
         if ($action === 'fetch_instances') {
+            // 预留 action:已被 test_account 取代,前端未调用,保留以兼容旧客户端/测试
             $this->handleFetchInstances();
             return true;
         }
@@ -203,6 +231,7 @@ class HttpRouter
             return true;
         }
         if ($action === 'get_ecs_create_task') {
+            // 预留 action:ECS 创建当前为同步流程,前端直接消费创建返回;保留供异步任务轮询扩展
             $this->handleGetEcsCreateTask();
             return true;
         }
@@ -215,6 +244,7 @@ class HttpRouter
             return true;
         }
         if ($action === 'get_history') {
+            // 预留 action:前端暂无入口,保留供账号历史用量图表扩展
             $this->handleGetHistory();
             return true;
         }
@@ -236,6 +266,14 @@ class HttpRouter
         }
         if ($action === 'replace_instance_ip') {
             $this->handleReplaceInstanceIp();
+            return true;
+        }
+        if ($action === 'allocate_ipv6') {
+            $this->handleAllocateIpv6();
+            return true;
+        }
+        if ($action === 'release_ipv6') {
+            $this->handleReleaseIpv6();
             return true;
         }
         if ($action === 'get_status') {
@@ -269,7 +307,14 @@ class HttpRouter
 
         $data = $this->request->getJsonBody();
         try {
+            // 一次性安装令牌校验,防止任意访客抢占初始化
+            $expected = $this->app->getConfigManager()->getSetupToken();
+            if ($expected === '' || !hash_equals($expected, (string) ($data['setup_token'] ?? ''))) {
+                $this->json(['success' => false, 'message' => '安装令牌错误，请查看容器启动日志中的 SETUP_TOKEN'], 403);
+                return;
+            }
             if ($this->app->getAuthManager()->setup($data)) {
+                $this->app->getConfigManager()->clearSetupToken();
                 session_regenerate_id(true);
                 $_SESSION['is_admin'] = true;
                 $this->rotateCsrfToken();
@@ -344,15 +389,40 @@ class HttpRouter
             return;
         }
 
-        $this->json($this->app->getResponseBuilder()->getStatusForFrontend(true), 200, 0, true);
+        // 显式 sync=true 视为写操作:强制刷新实例数据,需 POST + CSRF;
+        // 普通 GET 仅返回节流缓存的只读状态,避免 GET 触发写副作用
+        $input = $this->request->getJsonBody();
+        $forceSync = ($input['sync'] ?? false) === true || $this->request->getQueryParam('sync') === '1';
+        if ($forceSync) {
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                $this->json(['error' => 'Method not allowed'], 405, 0, true);
+                return;
+            }
+            if (!$this->requireCsrf()) {
+                return;
+            }
+        }
+
+        $this->json($this->app->getResponseBuilder()->getStatusForFrontend(true, $forceSync), 200, 0, true);
     }
 
     private function handleExport(): void
     {
         try {
-            $redact = $this->request->getQueryParam('redact') === '1'
-                || ($this->request->getJsonBody()['redact'] ?? false);
-            $this->json($this->app->getExportService()->export($redact), 200, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT, true);
+            $body = $this->request->getJsonBody();
+            // 默认脱敏导出;完整备份(full=1)必须显式声明且通过管理员密码二次认证
+            $wantFull = $this->request->getQueryParam('full') === '1'
+                || ($body['full'] ?? false) === true;
+
+            if ($wantFull) {
+                $password = (string) ($body['password'] ?? '');
+                if ($password === '' || !$this->app->getAuthManager()->verifyPassword($password)) {
+                    $this->json(['success' => false, 'message' => '完整备份需要验证管理员密码'], 403, 0, true);
+                    return;
+                }
+            }
+
+            $this->json($this->app->getExportService()->export(!$wantFull), 200, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT, true);
         } catch (Exception $e) {
             $this->json(['success' => false, 'message' => $e->getMessage()], 400, 0, true);
         }
@@ -369,12 +439,18 @@ class HttpRouter
     private function handleSaveConfig(): void
     {
         $data = $this->request->getJsonBody();
-        $success = $this->app->getConfigManager()->updateConfig($data);
-        if ($success) {
-            $this->app->getNotificationService()->setConfig($this->app->getConfigManager()->getAllSettings());
-            $this->json(['success' => true]);
-        } else {
-            $this->json(['success' => false, 'message' => '保存失败']);
+        try {
+            $success = $this->app->getConfigManager()->updateConfig($data);
+            if ($success) {
+                $this->app->getNotificationService()->setConfig($this->app->getConfigManager()->getAllSettings());
+                $this->app->getDdnsService()->setConfig($this->app->getConfigManager()->getAllSettings());
+                $this->json(['success' => true]);
+            } else {
+                $this->json(['success' => false, 'message' => '保存失败']);
+            }
+        } catch (Exception $e) {
+            $this->app->getDb()->addLog('error', '保存配置异常: ' . strip_tags($e->getMessage()));
+            $this->json(['success' => false, 'message' => $e->getMessage()]);
         }
     }
 
@@ -479,6 +555,12 @@ class HttpRouter
         try {
             $result = $this->app->getEcsCreateService()->previewEcsCreate($data);
             $_SESSION['ecs_create_previews'] = $_SESSION['ecs_create_previews'] ?? [];
+            // 只保留 15 分钟内有效的预检,防止反复预检导致 session 膨胀
+            foreach ($_SESSION['ecs_create_previews'] as $pid => $store) {
+                if ((time() - ($store['created_at'] ?? 0)) > 900) {
+                    unset($_SESSION['ecs_create_previews'][$pid]);
+                }
+            }
             $_SESSION['ecs_create_previews'][$result['previewId']] = [
                 'summary' => $result['summary'],
                 'created_at' => time(),
@@ -572,6 +654,12 @@ class HttpRouter
 
     private function handleLogout(): void
     {
+        $_SESSION = [];
+        if (ini_get('session.use_cookies')) {
+            $params = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000,
+                $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+        }
         session_destroy();
         $this->json(['success' => true]);
     }
@@ -607,6 +695,12 @@ class HttpRouter
             return;
         }
 
+        // 停机方式白名单校验:防止非法值透传阿里云,且 StopCharging(停机即停止计费)由服务端显式允许
+        $allowedShutdownModes = ['KeepCharging', 'StopCharging'];
+        if (!in_array($shutdownMode, $allowedShutdownModes, true)) {
+            $shutdownMode = 'KeepCharging';
+        }
+
         $result = $this->app->getInstanceActionService()->controlInstance($accountId, $action, $shutdownMode, true, function($account, $fromStatus, $toStatus, $reason = '') {
             $fromStatus = InstanceStatus::tryFrom((string) ($fromStatus ?: 'Unknown')) ?? InstanceStatus::Unknown;
             $toStatus = InstanceStatus::tryFrom((string) ($toStatus ?: 'Unknown')) ?? InstanceStatus::Unknown;
@@ -614,11 +708,7 @@ class HttpRouter
             if ($fromStatus === InstanceStatus::Unknown) return;
             $accountLabel = Helpers::getAccountLogLabel($account);
             $res = $this->app->getNotificationService()->notifyInstanceStatusChanged($accountLabel, $account, $fromStatus->value, $toStatus->value, $reason);
-            if ($res === true) {
-                $this->app->getDb()->addLog('info', "通知推送成功 [$accountLabel]");
-            } elseif ($res !== false && $res !== true) {
-                $this->app->getDb()->addLog('warning', "通知推送异常/失败 [$accountLabel]: " . strip_tags($res));
-            }
+            Helpers::logNotificationResult($this->app->getDb(), $res, $accountLabel);
         });
         $this->json(['success' => $result]);
     }
@@ -639,5 +729,23 @@ class HttpRouter
         $accountId = $data['accountId'] ?? 0;
 
         $this->json($this->app->getInstanceActionService()->replaceInstanceIp($accountId));
+    }
+
+    private function handleAllocateIpv6(): void
+    {
+        $data = $this->request->getJsonBody();
+        $accountId = $data['accountId'] ?? 0;
+        // 带宽按量计费(PayByTraffic,1~1000 Mbps);前端暂未提供输入,使用默认 5 Mbps
+        $bandwidth = max(1, min(1000, (int) ($data['bandwidth'] ?? 5)));
+
+        $this->json($this->app->getInstanceActionService()->allocateIpv6($accountId, $bandwidth));
+    }
+
+    private function handleReleaseIpv6(): void
+    {
+        $data = $this->request->getJsonBody();
+        $accountId = $data['accountId'] ?? 0;
+
+        $this->json($this->app->getInstanceActionService()->releaseIpv6($accountId));
     }
 }

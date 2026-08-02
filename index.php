@@ -1,4 +1,6 @@
 <?php
+// 统一时区:定时开关机/账单月/统计日等 date() 计算依赖时区,裸机部署时也保持一致
+date_default_timezone_set('Asia/Shanghai');
 ini_set('session.cookie_httponly', 1);
 ini_set('session.cookie_secure', isset($_SERVER['HTTPS']) ? 1 : 0);
 ini_set('session.cookie_samesite', 'Lax');

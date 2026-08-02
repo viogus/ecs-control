@@ -28,6 +28,10 @@ class TelegramControlService
 
     public function processUpdatesWithTimeout($timeout = 1)
     {
+        // 常驻进程配置热更新:每轮重新读取配置,保证 token/白名单/代理修改即时生效
+        $this->settings = $this->configManager->getAllSettings();
+        $this->api->setSettings($this->settings);
+
         if (!$this->isConfigured()) {
             return 0;
         }

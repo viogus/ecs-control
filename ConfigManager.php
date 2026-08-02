@@ -2,6 +2,19 @@
 
 class ConfigManager
 {
+    /**
+     * 敏感配置 key 列表:入库前加密,读取时自动解密。
+     * 避免 SMTP 密码/Telegram Token/Cloudflare Token/monitor_key 明文落入 SQLite 文件。
+     */
+    private const SENSITIVE_SETTING_KEYS = [
+        'notify_password',
+        'notify_tg_token',
+        'notify_tg_proxy_pass',
+        'ddns_cf_token',
+        'notify_wh_url',
+        'monitor_key',
+    ];
+
     private $database;
     private $db;
     private $configCache = [];
@@ -59,6 +72,13 @@ class ConfigManager
 
         $this->resetMonthlyTrafficCacheIfNeeded();
 
+        // 敏感配置迁移:存量明文自动加密回写,防止数据库泄露时直接暴露密码/token
+        foreach (self::SENSITIVE_SETTING_KEYS as $key) {
+            if (isset($this->configCache[$key]) && $this->configCache[$key] !== '' && !$this->isEncryptedValue($this->configCache[$key])) {
+                $this->saveSetting($key, $this->configCache[$key]);
+            }
+        }
+
         $stmt = $this->db->query("SELECT * FROM accounts WHERE is_deleted = 0 ORDER BY region_id ASC, remark ASC, id ASC");
         $rows = $stmt->fetchAll();
         $this->accountsCache = [];
@@ -102,12 +122,23 @@ class ConfigManager
 
     public function get($key, $default = null): mixed
     {
-        return $this->configCache[$key] ?? $default;
+        $value = $this->configCache[$key] ?? $default;
+        if ($value !== null && in_array($key, self::SENSITIVE_SETTING_KEYS, true) && $this->isEncryptedValue($value)) {
+            return $this->decryptValue($value);
+        }
+        return $value;
     }
 
     public function getAllSettings(): array
     {
-        return $this->configCache;
+        $result = $this->configCache;
+        // 敏感配置返回解密后的明文,调用方(通知/DDNS/导出)无需感知加密层
+        foreach (self::SENSITIVE_SETTING_KEYS as $key) {
+            if (isset($result[$key]) && $this->isEncryptedValue($result[$key])) {
+                $result[$key] = $this->decryptValue($result[$key]);
+            }
+        }
+        return $result;
     }
 
     public function getAccounts(): array
@@ -169,8 +200,31 @@ class ConfigManager
         return !empty($this->configCache['admin_password']);
     }
 
+    /**
+     * 获取一次性安装令牌。系统未初始化时生成并持久化,
+     * 用于防止 setup 接口被任意访客抢占初始化。
+     */
+    public function getSetupToken(): string
+    {
+        $token = (string) ($this->configCache['setup_token'] ?? '');
+        if ($token === '') {
+            $token = bin2hex(random_bytes(16));
+            $this->saveSetting('setup_token', $token);
+        }
+        return $token;
+    }
+
+    public function clearSetupToken(): void
+    {
+        $this->saveSetting('setup_token', '');
+    }
+
     private function saveSetting($key, $value)
     {
+        // 敏感配置入库前加密(空值与已加密值跳过,避免二次加密)
+        if (in_array($key, self::SENSITIVE_SETTING_KEYS, true) && $value !== '' && !$this->isEncryptedValue($value)) {
+            $value = $this->encryptValue($value);
+        }
         $stmt = $this->db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
         $stmt->execute([$key, $value]);
         $this->configCache[$key] = $value;
@@ -432,6 +486,25 @@ class ConfigManager
         $this->load();
     }
 
+    public function updateAccountIpv6Metadata($id, array $metadata)
+    {
+        $stmt = $this->db->prepare("
+            UPDATE accounts
+            SET ipv6_address = ?,
+                ipv6_internet_bandwidth_id = ?,
+                ipv6_gateway_id = ?
+            WHERE id = ?
+        ");
+
+        $stmt->execute([
+            $metadata['ipv6_address'] ?? '',
+            $metadata['ipv6_internet_bandwidth_id'] ?? '',
+            $metadata['ipv6_gateway_id'] ?? '',
+            $id
+        ]);
+        $this->load();
+    }
+
     public function deleteAccountById($id)
     {
         $stmt = $this->db->prepare("DELETE FROM accounts WHERE id = ?");
@@ -468,6 +541,8 @@ class ConfigManager
         // 此尸体记录会在下一次或下下一次定时同步时，由于彻底在阿里云失联，被同步器的 deleteStmt 收尸清理。
         $stmt = $this->db->prepare("UPDATE accounts SET is_deleted = 2, instance_status = 'Released' WHERE id = ?");
         $stmt->execute([$id]);
+        // 兜底清理释放队列的强制释放标记,防止清理阶段抛异常时残留
+        $this->db->prepare("DELETE FROM settings WHERE key = ?")->execute(['force_stop_' . (int) $id]);
         // 不强制更新 cache，后台无声息处理。
     }
 
