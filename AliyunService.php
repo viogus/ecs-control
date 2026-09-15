@@ -76,7 +76,8 @@ class AliyunService
                         'timeout' => 20.0
                     ])
                     ->request();
-            }, 'getTraffic');
+            // 幂等读操作：允许对传输层错误(SDK.ServerUnreachable 等)追加一次尝试，吸收瞬时网络抖动
+            }, 'getTraffic', 3, 1);
 
             $this->trafficCache[$cacheKey] = $result;
         }

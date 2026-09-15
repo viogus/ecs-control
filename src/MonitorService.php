@@ -200,7 +200,10 @@ class MonitorService
         try {
             return $this->aliyunService->controlInstance($account, $action, $shutdownMode);
         } catch (ClientException $e) {
-            $this->db->addLog('error', "实例操作失败 [{$action}]: 权限不足或配置错误 (" . $e->getErrorCode() . ")");
+            $code = (string) $e->getErrorCode();
+            $this->db->addLog('error', Helpers::isNetworkError($code, $e->getMessage())
+                ? "实例操作失败 [{$action}]: 网络异常 ({$code})"
+                : "实例操作失败 [{$action}]: 权限不足或配置错误 ({$code})");
             return false;
         } catch (ServerException $e) {
             $this->db->addLog('error', "实例操作失败 [{$action}]: " . $e->getErrorCode() . " - " . strip_tags($e->getErrorMessage()));
@@ -321,11 +324,13 @@ class MonitorService
 
     private function handleTrafficCircuitBreaker($account, int $currentTime, int $threshold, string $shutdownMode, string $thresholdAction, array &$s, int $userInterval = 600): bool
     {
-        // 数据新鲜度保护:CDT 持续失败超过 15 分钟时,基于陈旧数据熔断可能误停/反复告警,跳过本轮
+        // 数据新鲜度保护:CDT 持续失败超过 15 分钟时,基于陈旧数据熔断可能误停/反复告警,跳过本轮。
+        // 但这段时间保护实际处于失效状态,必须显式告警一次(见 notifyCdtUnavailable),否则可能静默超量。
         $stmt = $this->db->getPdo()->prepare("SELECT value FROM settings WHERE key = ?");
         $stmt->execute(['cdt_failure_at_' . $this->cdtFailureKeySuffix($account)]);
         $cdtFailureAt = (int) $stmt->fetchColumn();
         if ($cdtFailureAt > 0 && ($currentTime - $cdtFailureAt) > 900) {
+            $this->notifyCdtUnavailable($account, $currentTime, $cdtFailureAt, $s);
             $s['apiStatusLog'] .= " [流量数据持续异常" . ($currentTime - $cdtFailureAt) . "s,跳过熔断]";
             return false;
         }
@@ -398,6 +403,61 @@ class MonitorService
         }
 
         return true;
+    }
+
+    // ---- CDT 持续失败告警 ----
+
+    /** 通知渠道推送失败后的重试窗口(秒):窗口内不重复推送,避免每分钟轰炸 */
+    private const CDT_NOTIFY_RETRY_WINDOW = 1800;
+
+    /**
+     * 流量数据持续失败超过熔断豁免阈值(15 分钟)时告警一次。
+     * 该窗口内熔断层被跳过、保护实际失效,不告警就可能静默超量。
+     * 去重按 AK(同一 AK 的多实例共用 CDT 数据源);只有推送成功才写 cdt_failure_notified_at_*,
+     * 推送失败只记 cdt_failure_notify_attempt_at_*,窗口期满后自动重试,避免渠道故障导致永久静默。
+     * CDT 恢复后由 AccountRefresher 清除这几个标记。
+     */
+    private function notifyCdtUnavailable($account, int $currentTime, int $failureAt, array &$s): void
+    {
+        $notifySuffix = Helpers::cdtNotifyKeySuffix($account);
+        $notifiedKey = 'cdt_failure_notified_at_' . $notifySuffix;
+        $attemptKey = 'cdt_failure_notify_attempt_at_' . $notifySuffix;
+        $pdo = $this->db->getPdo();
+        $stmt = $pdo->prepare("SELECT value FROM settings WHERE key = ?");
+
+        $stmt->execute([$notifiedKey]);
+        if ((int) $stmt->fetchColumn() > 0) {
+            // 已成功告警过:仅保留状态说明,避免每分钟重复推送
+            $s['apiStatusLog'] .= ' [已告警:流量数据中断]';
+            return;
+        }
+        $stmt->execute([$attemptKey]);
+        $lastAttemptAt = (int) $stmt->fetchColumn();
+        if ($lastAttemptAt > 0 && ($currentTime - $lastAttemptAt) < self::CDT_NOTIFY_RETRY_WINDOW) {
+            // 上次推送失败,仍在重试窗口内
+            $s['apiStatusLog'] .= ' [告警推送失败,待重试]';
+            return;
+        }
+
+        $failedMinutes = max(1, (int) round(($currentTime - $failureAt) / 60));
+        $lastStatus = trim((string) ($account->trafficApiStatus ?? ''));
+        $lastMessage = trim((string) ($account->trafficApiMessage ?? ''));
+        $notifyResult = $this->notificationService->notifyCdtTrafficUnavailable(
+            $account, $failedMinutes, $lastStatus, $lastMessage
+        );
+        Helpers::logNotificationResult($this->db, $notifyResult, $s['accountLabel']);
+        if ($notifyResult !== true) {
+            $retryMinutes = (int) (self::CDT_NOTIFY_RETRY_WINDOW / 60);
+            $this->db->addLog('error', "CDT 流量数据中断告警推送失败 [{$s['accountLabel']}]，{$retryMinutes} 分钟后重试");
+        }
+        $this->db->addLog('warning', "CDT 流量数据持续中断 {$failedMinutes} 分钟，自动停机保护暂时失效 [{$s['accountLabel']}] 最后错误:{$lastStatus} {$lastMessage}");
+        $s['actions'][] = "流量数据中断{$failedMinutes}分钟";
+
+        $write = $pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+        $write->execute([$attemptKey, (string) $currentTime]);
+        if ($notifyResult === true) {
+            $write->execute([$notifiedKey, (string) $currentTime]);
+        }
     }
 
     // ---- Phase 2b: 费用熔断 ----

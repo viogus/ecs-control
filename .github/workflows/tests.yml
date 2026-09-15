@@ -1,0 +1,30 @@
+name: PHP Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # tests/ 下的脚本是自建 harness(无 PHPUnit)，用官方镜像跑，避免额外 action 依赖
+      - name: Install dependencies
+        run: docker run --rm -v "$PWD":/app -w /app composer:2 composer install --no-interaction --no-progress
+
+      - name: Run test scripts
+        run: |
+          set -o pipefail
+          failed=0
+          for test in tests/*Test.php; do
+            echo "=== ${test} ==="
+            if ! docker run --rm -v "$PWD":/app -w /app php:8.2-cli \
+              php -d auto_prepend_file=/app/vendor/autoload.php "/app/${test}"; then
+              failed=1
+            fi
+          done
+          exit $failed

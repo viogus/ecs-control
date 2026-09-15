@@ -71,6 +71,28 @@ class NotificationService
         ], 'warning', $accessKeyId);
     }
 
+    /**
+     * CDT 流量数据持续取不到(熔断层因此跳过)时的告警。
+     * 与 notifyCredentialInvalid 的区别:AK 可能有效,只是权限/网络导致数据缺失,保护处于失效状态。
+     */
+    public function notifyCdtTrafficUnavailable($account, int $failedMinutes, string $lastStatus = '', string $lastMessage = '')
+    {
+        $accountLabel = Helpers::getAccountLogLabel($account);
+        $statusText = $lastStatus !== '' ? $lastStatus : '未知';
+        if ($lastMessage !== '') {
+            $statusText .= "（{$lastMessage}）";
+        }
+        return $this->notify('流量数据中断 - 自动停机保护暂停', "CDT 流量数据已连续取不到，保护暂时失效，请尽快处理。", [
+            ['label' => '账号', 'value' => $accountLabel],
+            ['label' => '实例编号', 'value' => ($account->instanceId ?? '') ?: '-', 'highlight' => true],
+            ['label' => '区域', 'value' => ($account->regionId ?? '') ?: '-'],
+            ['label' => '中断时长', 'value' => "{$failedMinutes} 分钟", 'highlight' => true],
+            ['label' => '最后错误', 'value' => $statusText],
+            ['label' => '影响', 'value' => '数据中断期间不会触发流量熔断，可能继续超量计费'],
+            ['label' => '处理建议', 'value' => '检查 AK 的 CDT 权限与网络连通性；数据恢复后保护会自动重新启用。']
+        ], 'warning', ($account->accessKeyId ?? '') ?: $accountLabel);
+    }
+
     public function notifyEcsCreated($accountLabel, array $result, array $preview = [])
     {
         return $this->notify('ECS 创建并启动成功', '实例已创建并启动，请立即保存一次性登录密码。', [

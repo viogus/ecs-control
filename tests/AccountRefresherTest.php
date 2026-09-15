@@ -255,9 +255,9 @@ function test_auth_error_sets_invalid_flag(): void
 
 test_auth_error_sets_invalid_flag();
 
-// ---- Test 5: Status Unknown + traffic failure = old update time ----
+// ---- Test 5: 状态 Unknown + 流量失败 = 进入失败冷却窗口 ----
 
-function test_unknown_and_traffic_failure_keeps_old_time(): void
+function test_unknown_and_traffic_failure_advances_cooldown(): void
 {
     $db = new FakeRefresherDb();
     $aliyun = new FakeRefresherAliyun();
@@ -281,12 +281,14 @@ function test_unknown_and_traffic_failure_keeps_old_time(): void
 
     assert_refresher(1.0, $result->traffic, 'should keep old traffic on double failure');
     assert_refresher('Unknown', $result->status, 'should be Unknown on status failure');
-    assert_refresher(300, $result->newUpdateTime, 'should keep old update time on double failure');
+    // 流量与状态都失败时,更新时间推进到 currentTime-300(1000-300=700)而非保留旧值:
+    // shouldCheckApi 据此在冷却期内跳过重试,避免每分钟全量请求触发阿里云限流
+    assert_refresher(700, $result->newUpdateTime, 'double failure should advance to cooldown window');
     assert_refresher(false, $result->trafficSuccess, 'trafficSuccess false');
     assert_refresher(false, $result->authInvalid, 'exception is not auth error');
 }
 
-test_unknown_and_traffic_failure_keeps_old_time();
+test_unknown_and_traffic_failure_advances_cooldown();
 
 // ---- Test 6: SDK.ServerUnreachable 不得挂起自动停机保护 ----
 // 回归:网络抖动曾被归类为 auth_error,导致每轮误暂停自动停机保护,
@@ -328,5 +330,49 @@ function test_server_unreachable_does_not_suspend_protection(): void
 }
 
 test_server_unreachable_does_not_suspend_protection();
+
+// ---- Test 7: 恢复成功时清除 CDT 失败标记与告警去重标记(去重键按 AK) ----
+
+function test_successful_refresh_clears_cdt_markers(): void
+{
+    $db = new FakeRefresherDb();
+    $aliyun = new FakeRefresherAliyun();
+    $aliyun->trafficValue = 4.5;
+    $aliyun->status = 'Running';
+    $config = new FakeRefresherConfig();
+
+    $account = Account::fromDbRow([
+        'id' => 7,
+        'access_key_id' => 'AKIDMARKERS0001',
+        'access_key_secret' => 'secret',
+        'region_id' => 'cn-hongkong',
+        'instance_id' => 'i-7',
+        'traffic_used' => 1.0,
+        'updated_at' => 100,
+    ]);
+
+    $notifySuffix = Helpers::cdtNotifyKeySuffix($account);
+    $markers = [
+        'cdt_failure_at_7',
+        'cdt_failure_notified_at_' . $notifySuffix,
+        'cdt_failure_notify_attempt_at_' . $notifySuffix,
+    ];
+    foreach ($markers as $key) {
+        $db->getPdo()->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+            ->execute([$key, '1000']);
+    }
+    assert_refresher(true, strpos($notifySuffix, 'ak-') === 0, 'dedupe suffix should be AK-scoped');
+
+    $refresher = new AccountRefresher($db, $aliyun, $config);
+    $refresher->refresh($account, 2000);
+
+    foreach ($markers as $key) {
+        $stmt = $db->getPdo()->prepare("SELECT COUNT(*) FROM settings WHERE key = ?");
+        $stmt->execute([$key]);
+        assert_refresher(0, (int) $stmt->fetchColumn(), "marker {$key} should be cleared after recovery");
+    }
+}
+
+test_successful_refresh_clears_cdt_markers();
 
 echo "AccountRefresher tests passed\n";

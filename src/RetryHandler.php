@@ -5,10 +5,16 @@ use AlibabaCloud\Client\Exception\ServerException;
 
 class RetryHandler
 {
-    public static function execute(callable $func, string $action, int $maxRetries = 3): mixed
+    /**
+     * @param int $networkRetries 允许对传输层错误（ClientException 中的网络不可达/超时）追加的尝试次数。
+     *                            默认 0：请求可能已到达服务端，对非幂等写操作重试有重复执行风险。
+     *                            幂等读操作（如 CDT 流量查询）可传 1，吸收瞬时网络抖动。
+     */
+    public static function execute(callable $func, string $action, int $maxRetries = 3, int $networkRetries = 0): mixed
     {
         $attempt = 0;
         $lastException = null;
+        $networkAttempts = 0;
 
         while ($attempt < $maxRetries) {
             try {
@@ -21,8 +27,19 @@ class RetryHandler
                     $attempt++;
                     continue;
                 }
-                // 网络/客户端错误(连接超时、DNS 失败等)不重试:请求可能已到服务端,
+                // 网络/客户端错误(连接超时、DNS 失败等)默认不重试:请求可能已到服务端,
                 // 对非幂等写操作重试有重复执行风险,交由上层决定。
+                // 幂等读操作显式开启 networkRetries 后重试:请求未到达服务端,不存在重复执行风险。
+                if ($networkAttempts < $networkRetries
+                    && Helpers::isNetworkError($errorCode, $e->getMessage())) {
+                    $networkAttempts++;
+                    $lastException = $e;
+                    $attempt++;
+                    if ($attempt < $maxRetries) {
+                        self::backoff($attempt);
+                    }
+                    continue;
+                }
                 throw $e;
             } catch (ServerException $e) {
                 $httpStatus = 0;

@@ -42,22 +42,74 @@ class Helpers
     }
 
     /**
-     * 判断 SDK 异常是否属于网络/传输层问题（端点不可达、连接超时、DNS 失败、SSL 异常等）。
+     * SDK 客户端层（ClientException）错误码全集见
+     * vendor/alibabacloud/client/src/Exception/ClientException.php，其中只有下面两个表示
+     * 「请求未到达服务端」：连接失败/socket 读写超时、主机名无法解析。
+     */
+    private const NETWORK_ERROR_CODES = ['sdk.serverunreachable', 'sdk.hostnotfound'];
+
+    /** 消息兜底特征：仅在 errorCode 缺失或非 SDK 码时使用（如 Guzzle/cURL 直接抛出的异常）。 */
+    private const NETWORK_ERROR_HINTS = ['timed out', 'timeout', 'unreachable', 'no route to host',
+        'could not resolve', 'name or service not known', 'connection refused', 'connection reset',
+        'curl error', 'ssl handshake', 'network is down'];
+
+    /**
+     * 判断异常是否属于网络/传输层问题（端点不可达、连接超时、DNS 失败等）。
      * 这类错误的请求根本没到达服务端、不携带任何鉴权结论，不能据此判定 AK 失效或权限不足。
      */
     public static function isNetworkError(string $code, string $message = ''): bool
     {
-        $haystack = strtolower(trim($code) . ' ' . strip_tags(trim($message)));
-        if (trim($haystack) === '') return false;
+        $normalizedCode = strtolower(trim($code));
+        if ($normalizedCode !== '') {
+            if (in_array($normalizedCode, self::NETWORK_ERROR_CODES, true)) return true;
+            // 其余 SDK.* 是 SDK 的本地判定结果（参数/区域/解析错误），不再靠消息猜
+            if (strpos($normalizedCode, 'sdk.') === 0) return false;
+        }
 
-        $needles = ['serverunreachable', 'unreachable', 'timeout', 'timed out', 'timedout',
-            'cannot connect', 'could not connect', 'connection refused', 'connection reset',
-            'curl error', 'could not resolve', 'name or service not known', 'ssl', 'network'];
-        foreach ($needles as $needle) {
-            if (strpos($haystack, $needle) !== false) return true;
+        $normalizedMessage = strtolower(strip_tags(trim($message)));
+        if ($normalizedMessage === '') return false;
+        foreach (self::NETWORK_ERROR_HINTS as $needle) {
+            if (strpos($normalizedMessage, $needle) !== false) return true;
         }
 
         return false;
+    }
+
+    /**
+     * 判断服务端返回的是否为权限类错误（RAM 未授权 / 策略拒绝）。
+     * 与「AK 已失效」区分：AK 有效但缺少 CDT 权限时流量数据同样取不到，但处置方式不同。
+     */
+    public static function isPermissionError(string $code, string $message = ''): bool
+    {
+        $normalizedCode = strtolower(trim($code));
+        if ($normalizedCode !== '') {
+            if (strpos($normalizedCode, 'forbidden') === 0) return true;
+            if (in_array($normalizedCode, ['nopermission', 'accessdenied', 'unauthorized',
+                'invalidpermission', 'permissiondenied'], true)) return true;
+        }
+
+        $normalizedMessage = strtolower(strip_tags(trim($message)));
+        if ($normalizedMessage === '') return false;
+
+        return strpos($normalizedMessage, 'no permission') !== false
+            || strpos($normalizedMessage, 'not authorized') !== false
+            || strpos($normalizedMessage, 'access denied') !== false
+            || strpos($normalizedMessage, 'forbidden') !== false;
+    }
+
+    /**
+     * 「CDT 持续失败」告警的去重键后缀。
+     * CDT 按 AK 聚合查询(见 AliyunService::getTraffic 的 trafficCache),同一 AK 的多台实例必然
+     * 同时失败,因此按 AK 汇总去重,避免一个分组刷出 N 条重复告警;AK 缺失时退回账号 id。
+     */
+    public static function cdtNotifyKeySuffix($account): string
+    {
+        $accessKeyId = trim((string) ($account['access_key_id'] ?? ''));
+        if ($accessKeyId !== '') {
+            return 'ak-' . substr(md5(strtolower($accessKeyId)), 0, 16);
+        }
+
+        return 'acct-' . (string) ($account['id'] ?? 'unknown');
     }
 
     public static function safeGetCdtTraffic(AliyunService $aliyunService, $account, ?Database $db = null): array
@@ -86,11 +138,17 @@ class Helpers
             return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => 'CDT 接口异常'];
         } catch (\AlibabaCloud\Client\Exception\ServerException $e) {
             $code = trim((string) $e->getErrorCode());
+            $message = strip_tags($e->getErrorMessage());
             if (self::isCredentialInvalidError($code, $e->getErrorMessage())) {
-                if ($db) $db->addLog('error', "CDT 流量查询失败 [{$label}]: {$code} - " . $e->getErrorMessage());
+                if ($db) $db->addLog('error', "CDT 流量查询失败 [{$label}]: {$code} - {$message}");
                 return ['success' => false, 'value' => null, 'status' => 'auth_error', 'message' => '账号 AK 已失效'];
             }
-            if ($db) $db->addLog('error', "CDT 流量查询失败 [{$label}]: " . $e->getErrorCode() . " - " . $e->getErrorMessage());
+            // AK 有效但 RAM 未授权：数据同样取不到，用独立状态让前端/汇总提示「缺少权限」而不是「鉴权失败」
+            if (self::isPermissionError($code, $message)) {
+                if ($db) $db->addLog('error', "CDT 流量查询缺少权限 [{$label}]: {$code} - {$message}");
+                return ['success' => false, 'value' => null, 'status' => 'permission_denied', 'message' => '缺少 CDT 权限，请检查 RAM 授权'];
+            }
+            if ($db) $db->addLog('error', "CDT 流量查询失败 [{$label}]: {$code} - {$message}");
             return ['success' => false, 'value' => null, 'status' => 'sync_error', 'message' => 'CDT 接口异常'];
         } catch (\Exception $e) {
             $isNetwork = self::isNetworkError('', $e->getMessage());

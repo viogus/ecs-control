@@ -79,6 +79,19 @@ function classify_cdt(?\Throwable $exception): array
     return ['result' => $result, 'db' => $db];
 }
 
+/** 构造真实的 ServerException（阿里云服务端返回 Code/Message） */
+function server_exception(string $code, string $message, int $status = 403): \AlibabaCloud\Client\Exception\ServerException
+{
+    $response = new \GuzzleHttp\Psr7\Response(
+        $status,
+        ['Content-Type' => 'application/json'],
+        (string) json_encode(['Code' => $code, 'Message' => $message, 'RequestId' => 'req-test-1'])
+    );
+    return new \AlibabaCloud\Client\Exception\ServerException(
+        new \AlibabaCloud\Client\Result\Result($response)
+    );
+}
+
 // ---- 0. 前提自检：SDK 异常构造顺序与网络识别 ----
 
 $probe = new ClientException('Unable to connect server: timed out', 'SDK.ServerUnreachable');
@@ -96,10 +109,12 @@ assert_cdt(strpos($hit['db']->allLogText(), '请确认 AK 拥有 CDT 权限') ==
 assert_cdt(count($hit['db']->logsOfType('warning')) === 1, '网络错误记一条 warning');
 assert_cdt(count($hit['db']->logsOfType('error')) === 0, '网络错误不再记 error');
 
-// ---- 2. SDK.Timeout 等同网络错误 ----
+// ---- 2. 其它传输层错误码与「白名单优先」语义 ----
 
-$hit = classify_cdt(new ClientException('SDK timeout', 'SDK.Timeout'));
-assert_cdt($hit['result']['status'] === 'timeout', 'SDK.Timeout 归类为 timeout');
+$hit = classify_cdt(new ClientException('Server unreachable: could not resolve host cdt.aliyuncs.com', 'SDK.HostNotFound'));
+assert_cdt($hit['result']['status'] === 'timeout', 'SDK.HostNotFound 归类为 timeout');
+assert_cdt(Helpers::isNetworkError('SDK.ServerUnreachable', 'SocketTimeoutException has occurred'), 'SDK.ServerUnreachable 命中白名单');
+assert_cdt(!Helpers::isNetworkError('SDK.InvalidRegionId', 'connection timeout'), 'SDK.* 非网络码不再靠消息猜测');
 
 // ---- 3. 真正的 AK 失效仍判 auth_error ----
 
@@ -131,5 +146,25 @@ $hit = classify_cdt(null);
 assert_cdt($hit['result']['success'] === true, '成功路径 success=true');
 assert_cdt($hit['result']['status'] === 'ok', '成功路径 status=ok');
 assert_cdt((float) $hit['result']['value'] === 3.25, '成功路径返回流量值');
+
+// ---- 8. 服务端权限类错误 → permission_denied（与 AK 失效区分）----
+
+$permProbe = server_exception('Forbidden.NoPermission', 'The user is not authorized to operate on the specified resource.');
+assert_cdt($permProbe->getErrorCode() === 'Forbidden.NoPermission', 'ServerException 从响应体解析出 Code');
+assert_cdt(Helpers::isPermissionError('Forbidden.NoPermission', $permProbe->getErrorMessage()), 'Forbidden.* 识别为权限错误');
+assert_cdt(!Helpers::isPermissionError('InvalidAccessKeyId.NotFound', 'AccessKeyId is not found'), 'AK 失效不算权限错误');
+
+$hit = classify_cdt($permProbe);
+assert_cdt($hit['result']['status'] === 'permission_denied', "权限不足归类为 permission_denied（实际 {$hit['result']['status']}）");
+assert_cdt($hit['result']['status'] !== 'auth_error', '权限不足不等同于 AK 失效');
+assert_cdt(strpos($hit['db']->allLogText(), 'AK 已失效') === false, '权限不足不提示 AK 失效');
+assert_cdt(strpos($hit['db']->allLogText(), '缺少权限') !== false, '权限不足日志明确提示权限');
+assert_cdt($hit['result']['message'] === '缺少 CDT 权限，请检查 RAM 授权', '权限不足返回可操作提示');
+
+// ---- 9. 其它服务端错误仍为 sync_error ----
+
+$hit = classify_cdt(server_exception('InternalError', 'Internal server error', 500));
+assert_cdt($hit['result']['status'] === 'sync_error', "服务端 5xx 归类为 sync_error（实际 {$hit['result']['status']}）");
+assert_cdt($hit['result']['status'] !== 'auth_error', '服务端 5xx 不归类为 auth_error');
 
 echo "Helpers (CDT 错误分类) tests passed\n";

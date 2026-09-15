@@ -32,11 +32,23 @@ class AccountGroupOperationService
             $this->db->addLog('info', "实例列表获取成功 [{$maskedKey}] 共 " . count($instances) . " 台");
             return $instances;
         } catch (ClientException $e) {
-            $this->db->addLog('warning', "实例列表获取失败: 鉴权错误");
+            $code = (string) $e->getErrorCode();
+            // 网络类错误与鉴权错误分开提示：前者改 AK 无用，重试即可
+            if (Helpers::isNetworkError($code, $e->getMessage())) {
+                $this->db->addLog('warning', "实例列表获取失败: 网络异常 ({$code})");
+                throw new Exception('阿里云接口连接失败，请检查网络后重试');
+            }
+            $this->db->addLog('warning', "实例列表获取失败: 鉴权错误 ({$code})");
             throw new Exception('阿里云鉴权失败，请检查AK权限或密钥是否正确');
         } catch (ServerException $e) {
-            $this->db->addLog('warning', "实例列表获取失败: " . $e->getErrorCode() . " - " . strip_tags($e->getErrorMessage()));
-            throw new Exception('阿里云接口错误 [' . $e->getErrorCode() . ']: ' . $e->getErrorMessage());
+            $code = (string) $e->getErrorCode();
+            $errorMessage = strip_tags($e->getErrorMessage());
+            if (Helpers::isPermissionError($code, $errorMessage)) {
+                $this->db->addLog('warning', "实例列表获取失败: 权限不足 ({$code})");
+                throw new Exception('当前 AK 缺少 ECS 读取权限，请在 RAM 中授权后重试');
+            }
+            $this->db->addLog('warning', "实例列表获取失败: {$code} - {$errorMessage}");
+            throw new Exception("阿里云接口错误 [{$code}]: {$errorMessage}");
         } catch (\Exception $e) {
             $this->db->addLog('warning', "实例列表获取失败: " . strip_tags($e->getMessage()));
             throw new Exception('实例列表获取失败: 网络或系统错误');
@@ -103,11 +115,18 @@ class AccountGroupOperationService
                 'instanceCount' => $instanceCount
             ];
         } catch (ClientException $e) {
-            $message = '鉴权失败，请检查AK ID和AK Secret是否正确，或确认是否具备ECS 权限';
-            $this->db->addLog('warning', "账号测试失败: {$message}");
+            $code = (string) $e->getErrorCode();
+            $message = Helpers::isNetworkError($code, $e->getMessage())
+                ? '阿里云接口连接失败，请检查网络后重试'
+                : '鉴权失败，请检查AK ID和AK Secret是否正确，或确认是否具备ECS 权限';
+            $this->db->addLog('warning', "账号测试失败: {$message} ({$code})");
             throw new Exception($message);
         } catch (ServerException $e) {
-            $message = '阿里云接口错误 [' . $e->getErrorCode() . ']: ' . $e->getErrorMessage();
+            $code = (string) $e->getErrorCode();
+            $errorMessage = strip_tags($e->getErrorMessage());
+            $message = Helpers::isPermissionError($code, $errorMessage)
+                ? '当前 AK 缺少所需权限（ECS/CDT），请在 RAM 中授权后重试'
+                : "阿里云接口错误 [{$code}]: {$errorMessage}";
             $this->db->addLog('warning', "账号测试失败: {$message}");
             throw new Exception($message);
         } catch (Exception $e) {
@@ -277,6 +296,10 @@ class AccountGroupOperationService
 
         if (isset($statuses['auth_error'])) {
             return '部分账号 CDT 鉴权失败，请检查 AK 权限配置';
+        }
+
+        if (isset($statuses['permission_denied'])) {
+            return '部分账号缺少 CDT 权限，请在 RAM 中授权后重试';
         }
 
         if (isset($statuses['timeout'])) {

@@ -12,6 +12,11 @@
     "autoload": {
         "classmap": [
             "./"
+        ],
+        "exclude-from-classmap": [
+            "/tests/",
+            "/docs/",
+            "/cf-worker/"
         ]
     }
 }

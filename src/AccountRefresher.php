@@ -95,10 +95,14 @@ class AccountRefresher
             $traffic = (float) ($trafficResult['value'] ?? 0);
             $this->db->addHourlyStat($account->id, $traffic);
             $this->db->addDailyStat($account->id, $traffic);
-            // 恢复成功:清除失败标记
+            // 恢复成功:清除失败标记与「持续失败」告警标记(去重键按 AK),下次中断可重新告警
+            $suffix = $this->cdtFailureKeySuffix($account);
+            $notifySuffix = Helpers::cdtNotifyKeySuffix($account);
             $this->db->getPdo()
-                ->prepare("DELETE FROM settings WHERE key = ?")
-                ->execute(['cdt_failure_at_' . $this->cdtFailureKeySuffix($account)]);
+                ->prepare("DELETE FROM settings WHERE key IN (?, ?, ?)")
+                ->execute(['cdt_failure_at_' . $suffix,
+                    'cdt_failure_notified_at_' . $notifySuffix,
+                    'cdt_failure_notify_attempt_at_' . $notifySuffix]);
         }
 
         if ($status === InstanceStatus::Unknown->value) {
