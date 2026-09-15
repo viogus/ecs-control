@@ -288,4 +288,45 @@ function test_unknown_and_traffic_failure_keeps_old_time(): void
 
 test_unknown_and_traffic_failure_keeps_old_time();
 
+// ---- Test 6: SDK.ServerUnreachable 不得挂起自动停机保护 ----
+// 回归:网络抖动曾被归类为 auth_error,导致每轮误暂停自动停机保护,
+// 恢复后再刷出一条「账号鉴权已恢复」日志(线上日志里成对出现)
+
+function test_server_unreachable_does_not_suspend_protection(): void
+{
+    $db = new FakeRefresherDb();
+    $aliyun = new FakeRefresherAliyun();
+    $aliyun->trafficException = new \AlibabaCloud\Client\Exception\ClientException(
+        'Unable to connect server: timed out',
+        'SDK.ServerUnreachable'
+    );
+    $aliyun->status = 'Running';
+    $config = new FakeRefresherConfig();
+
+    $refresher = new AccountRefresher($db, $aliyun, $config);
+
+    $account = Account::fromDbRow([
+        'id' => 1,
+        'access_key_id' => 'AKIDtest',
+        'access_key_secret' => 'secret',
+        'region_id' => 'cn-hangzhou',
+        'instance_id' => 'i-test',
+        'traffic_used' => 2.0,
+        'updated_at' => 1000,
+    ]);
+
+    $result = $refresher->refresh($account, 2000);
+
+    assert_refresher('timeout', $result->metadata['traffic_api_status'], 'network error should be reported as timeout');
+    assert_refresher(false, $result->authInvalid, 'SDK.ServerUnreachable must not be treated as credential failure');
+    assert_refresher(false, isset($config->statusUpdates[0]['metadata']['protection_suspended']), 'protection must not be suspended on network error');
+    assert_refresher(false, $result->trafficSuccess, 'trafficSuccess should be false');
+    // 首次失败时间仍要记录,熔断层据此识别「持续失败」
+    $stmt = $db->getPdo()->prepare("SELECT value FROM settings WHERE key = ?");
+    $stmt->execute(['cdt_failure_at_1']);
+    assert_refresher('2000', (string) $stmt->fetchColumn(), 'failure timestamp should be recorded');
+}
+
+test_server_unreachable_does_not_suspend_protection();
+
 echo "AccountRefresher tests passed\n";
