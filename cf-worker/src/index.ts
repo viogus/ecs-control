@@ -1,6 +1,9 @@
 import type { Env, JwtPayload } from './types';
 import { verifyJwt, signJwt, verifyPassword, hashPassword, generateCsrfToken } from './auth';
-import { getAccounts, getSetting, getSettings, saveSetting, getLogs, addLog, getAccountById } from './db';
+import {
+  getAccounts, getSetting, getSettingPlain, getSettings, saveSetting, saveSettingsBulk,
+  getLogs, addLog, getAccountById,
+} from './db';
 import { runTrafficCheck } from './monitor';
 import { runScheduleCheck } from './schedules';
 import { syncDdns } from './ddns';
@@ -51,6 +54,7 @@ async function handleStatus(env: Env): Promise<Response> {
   return jsonResponse({ data: accs.filter(a => a.instance_id).map(a => { const { access_key_secret: _, ...rest } = a as any; return rest; }), system_last_run: 0, sync_interval: 600 });
 }
 
+// 与 PHP FrontendResponseBuilder::getConfigForFrontend 对齐：这些设置只回显掩码
 const MASKED_SETTINGS = new Set([
   'admin_password', 'notify_password', 'notify_tg_token', 'ddns_cf_token',
   'notify_tg_proxy_pass', 'monitor_key',
@@ -68,6 +72,9 @@ async function handleConfig(env: Env, _body: any, jwt: JwtPayload): Promise<Resp
       } catch { cfg[r.key] = '[]'; }
     } else if (MASKED_SETTINGS.has(r.key) && r.value) {
       cfg[r.key] = '********';
+    } else if (r.key === 'notify_wh_url' && r.value) {
+      // 加密存储、明文回显：与 PHP 侧一致（前端需要看到 URL 才能编辑）
+      cfg[r.key] = await getSettingPlain(env.DB, 'notify_wh_url', env.ENCRYPTION_KEY);
     } else {
       cfg[r.key] = r.value;
     }
@@ -76,11 +83,9 @@ async function handleConfig(env: Env, _body: any, jwt: JwtPayload): Promise<Resp
 }
 
 async function handleSaveConfig(env: Env, body: any): Promise<Response> {
-  for (const [k, v] of Object.entries(body)) {
-    if (k === 'csrf_token') continue;
-    if (k === 'account_groups') continue; // handled below with secret merge
-    await saveSetting(env.DB, k, String(v));
-  }
+  // 敏感项（notify_password / notify_tg_token / ddns_cf_token / notify_wh_url / monitor_key …）加密落库；
+  // 空值与 '********' 掩码视为「不修改」，避免回显值覆盖已存密钥。
+  await saveSettingsBulk(env.DB, body, env.ENCRYPTION_KEY, new Set(['account_groups']));
   if (Object.prototype.hasOwnProperty.call(body, 'account_groups')) {
     const existingRaw = await env.DB.prepare("SELECT value FROM settings WHERE key = 'account_groups'").first<{value:string}>();
     const groups = await mergeMaskedAccountGroupSecrets(body.account_groups, existingRaw?.value, env.ENCRYPTION_KEY);
@@ -173,22 +178,54 @@ async function handleSendTestTg(): Promise<Response> {
 }
 
 async function handleSendTestWh(env: Env): Promise<Response> {
-  const ok = await sendWebhook(env.DB, 'ECS Control 测试 Webhook');
+  const ok = await sendWebhook(env.DB, 'ECS Control 测试 Webhook', env.ENCRYPTION_KEY);
   return jsonResponse({ success: ok, message: ok ? 'Webhook 测试已发送' : '发送失败，请检查 Webhook 配置' });
 }
 
-async function handleExport(env: Env): Promise<Response> {
+/** 脱敏 webhook URL：仅保留 scheme + host（可能内嵌鉴权 token）—— 对齐 PHP ExportService::maskWebhookUrl */
+function maskWebhookUrl(url: string): string {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}/***`;
+  } catch { return '***'; }
+}
+
+async function handleExport(env: Env, body: any): Promise<Response> {
+  // 默认脱敏导出；完整备份（full=true）必须显式声明并通过管理员密码二次认证
+  const wantFull = body?.full === true || body?.full === '1' || body?.full === 1;
+  if (wantFull) {
+    const password = String(body?.password ?? '');
+    const hash = await getSetting(env.DB, 'admin_password', '');
+    if (!password || !(await verifyPassword(password, hash))) {
+      return jsonResponse({ success: false, message: '完整备份需要验证管理员密码' }, 403);
+    }
+  }
+  const redact = !wantFull;
+  const mask = '********';
+
   const settingsRows = await env.DB.prepare('SELECT key,value FROM settings').all<{key:string;value:string}>();
   const settingsData: Record<string, string> = {};
   for (const r of settingsRows.results) settingsData[r.key] = r.value;
   const rawAccounts = await env.DB.prepare('SELECT * FROM accounts WHERE is_deleted = 0').all<Record<string, unknown>>();
-  const groupJson = settingsData['account_groups'] || '[]';
+
+  // 敏感设置项在库里是密文：脱敏导出根本不需要解密，完整备份才读明文
+  const secretOf = async (key: string): Promise<string> =>
+    redact ? mask : getSettingPlain(env.DB, key, env.ENCRYPTION_KEY);
+  const adminPassword = redact ? mask : (settingsData['admin_password'] || '');
+  const notifyPassword = await secretOf('notify_password');
+  const tgToken = await secretOf('notify_tg_token');
+  const cfToken = await secretOf('ddns_cf_token');
+  const whUrlPlain = await getSettingPlain(env.DB, 'notify_wh_url', env.ENCRYPTION_KEY);
+  const whUrl = redact ? maskWebhookUrl(whUrlPlain) : whUrlPlain;
 
   const decryptFailures: string[] = [];
   const accounts = await Promise.all(rawAccounts.results.map(async a => {
     const label = (a.instance_id || a.remark || a.access_key_id) as string;
     let secret = String(a.access_key_secret ?? '');
-    if (isEncrypted(secret)) {
+    if (redact) {
+      secret = secret ? mask : '';
+    } else if (isEncrypted(secret)) {
       try { secret = await decrypt(secret, env.ENCRYPTION_KEY); } catch { secret = ''; decryptFailures.push(label); }
     }
     return {
@@ -216,9 +253,17 @@ async function handleExport(env: Env): Promise<Response> {
     }, 400);
   }
 
+  // account_groups 在库里同样是密文，导出前解密（否则导出的是不可用的密文）
+  let groups: any[] = [];
+  try { groups = await getGroupsFromSettings(env.DB, env.ENCRYPTION_KEY); } catch { groups = []; }
+  const accountGroups = groups.map(g => ({
+    ...g,
+    AccessKeySecret: redact ? mask : String(g.AccessKeySecret ?? ''),
+  }));
+
   return jsonResponse({ success: true, data: {
     settings: {
-      admin_password: '', traffic_threshold: settingsData['traffic_threshold'] || '95',
+      admin_password: adminPassword, traffic_threshold: settingsData['traffic_threshold'] || '95',
       shutdown_mode: settingsData['shutdown_mode'] || 'KeepCharging',
       threshold_action: settingsData['threshold_action'] || 'stop_and_notify',
       keep_alive: settingsData['keep_alive'] === '1',
@@ -232,19 +277,19 @@ async function handleExport(env: Env): Promise<Response> {
     notification: {
       email_enabled: settingsData['notify_email_enabled'] === '1', email: settingsData['notify_email'] || '',
       host: settingsData['notify_host'] || '', port: settingsData['notify_port'] || '465',
-      username: settingsData['notify_username'] || '', password: settingsData['notify_password'] || '',
+      username: settingsData['notify_username'] || '', password: notifyPassword,
       secure: settingsData['notify_secure'] || 'ssl', tg_enabled: settingsData['notify_tg_enabled'] === '1',
-      tg_token: settingsData['notify_tg_token'] || '', tg_chat_id: settingsData['notify_tg_chat_id'] || '',
-      wh_enabled: settingsData['notify_wh_enabled'] === '1', wh_url: settingsData['notify_wh_url'] || '',
+      tg_token: tgToken, tg_chat_id: settingsData['notify_tg_chat_id'] || '',
+      wh_enabled: settingsData['notify_wh_enabled'] === '1', wh_url: whUrl,
       wh_method: settingsData['notify_wh_method'] || 'GET',
     },
     ddns: {
       enabled: settingsData['ddns_enabled'] === '1', domain: settingsData['ddns_domain'] || '',
-      cf_zone_id: settingsData['ddns_cf_zone_id'] || '', cf_token: settingsData['ddns_cf_token'] || '',
+      cf_zone_id: settingsData['ddns_cf_zone_id'] || '', cf_token: cfToken,
       cf_proxied: settingsData['ddns_cf_proxied'] === '1',
     },
     accounts,
-    account_groups: JSON.parse(groupJson),
+    account_groups: accountGroups,
   }});
 }
 
@@ -459,7 +504,7 @@ export default {
 
     if (cron === '*/10 * * * *') {
       ctx.waitUntil((async () => {
-        try { await syncDdns(env.DB, accounts); }
+        try { await syncDdns(env.DB, accounts, env.ENCRYPTION_KEY); }
         catch (e: any) { try { await addLog(env.DB, 'error', `DDNS cron failed: ${e.message}`); } catch {} }
       })());
     }

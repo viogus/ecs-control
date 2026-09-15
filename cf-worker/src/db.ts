@@ -1,4 +1,5 @@
 import type { Account } from './types';
+import { decrypt, encrypt, isEncrypted } from './crypto';
 
 export function rowToAccount(row: Record<string, unknown>): Account {
   return {
@@ -60,6 +61,49 @@ export function getSetting(db: D1Database, key: string, def = ''): Promise<strin
 
 export function saveSetting(db: D1Database, key: string, value: string): Promise<D1Result> {
   return db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, value).run();
+}
+
+/**
+ * 与 PHP ConfigManager::SENSITIVE_SETTING_KEYS 对齐：这些设置加密后落库。
+ * notify_wh_url 可能内嵌鉴权 token，故一并加密；读取方必须用 getSettingPlain() 解密。
+ */
+export const SENSITIVE_SETTING_KEYS = new Set([
+  'notify_password', 'notify_tg_token', 'notify_tg_proxy_pass', 'ddns_cf_token', 'notify_wh_url', 'monitor_key',
+]);
+
+/** 读取设置项，自动解密（兼容历史明文值与未加密部署）。 */
+export async function getSettingPlain(db: D1Database, key: string, encKey: string, def = ''): Promise<string> {
+  const raw = await getSetting(db, key, def);
+  if (!raw || !isEncrypted(raw)) return raw;
+  return decrypt(raw, encKey);
+}
+
+/** 写入敏感设置项：空值与 '********' 掩码不覆盖已有值。 */
+export async function saveSettingSecret(db: D1Database, key: string, value: string, encKey: string): Promise<void> {
+  if (!value || value === '********') return;
+  if (isEncrypted(value)) {
+    await saveSetting(db, key, value);
+    return;
+  }
+  await saveSetting(db, key, await encrypt(value, encKey));
+}
+
+/**
+ * 批量写入 settings：敏感键自动加密，'********' 视为「不修改」。
+ * skipKeys 用于调用方已单独处理的键（如 account_groups）。
+ */
+export async function saveSettingsBulk(
+  db: D1Database, body: Record<string, unknown>, encKey: string, skipKeys: Set<string> = new Set()
+): Promise<void> {
+  for (const [k, v] of Object.entries(body)) {
+    if (k === 'csrf_token' || skipKeys.has(k)) continue;
+    const value = String(v);
+    if (SENSITIVE_SETTING_KEYS.has(k)) {
+      await saveSettingSecret(db, k, value, encKey);
+    } else {
+      await saveSetting(db, k, value);
+    }
+  }
 }
 
 export function getAccounts(db: D1Database): Promise<Account[]> {

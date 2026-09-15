@@ -2,3 +2,9 @@ node_modules/
 !package.json
 !package-lock.json
 .secrets
+
+# 本地验证产物（含密钥/本地 D1 状态，禁止提交）
+.dev.vars
+.dev.vars.*
+wrangler.local.toml
+.wrangler/

@@ -1,11 +1,11 @@
 import type { Account } from './types';
-import { getSetting, addLog } from './db';
+import { getSetting, getSettingPlain, addLog } from './db';
 
-export async function syncDdns(db: D1Database, accounts: Account[]): Promise<void> {
+export async function syncDdns(db: D1Database, accounts: Account[], encKey: string): Promise<void> {
   const enabled = await getSetting(db, 'ddns_enabled', '0') === '1';
   if (!enabled) return;
   const domain = await getSetting(db, 'ddns_domain', '');
-  const token = await getSetting(db, 'ddns_cf_token', '');
+  const token = await getSettingPlain(db, 'ddns_cf_token', encKey);
   const zoneId = await getSetting(db, 'ddns_cf_zone_id', '');
   const proxied = await getSetting(db, 'ddns_cf_proxied', '0') === '1';
   if (!domain || !token) return;

@@ -31,7 +31,7 @@ export async function mergeMaskedAccountGroupSecrets(groups: unknown, existingRa
       if ((group.AccessKeySecret ?? '') === '********') {
         const groupKey = String(group.groupKey ?? '');
         const derivedKey = groupKey || await buildGroupKey(String(group.AccessKeyId ?? ''), String(group.regionId ?? ''));
-        const existingSecret = existingByKey[derivedKey]?.AccessKeySecret ?? '********';
+        const existingSecret = String(existingByKey[derivedKey]?.AccessKeySecret ?? '********');
         // Try to decrypt with current key — if it fails, leave as ********
         // so the user is forced to re-enter the secret
         if (existingSecret !== '********' && encKey && isEncrypted(existingSecret)) {

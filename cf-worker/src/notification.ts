@@ -1,4 +1,4 @@
-import { getSetting } from './db';
+import { getSetting, getSettingPlain } from './db';
 
 export async function sendEmail(db: D1Database, subject: string, body: string): Promise<boolean> {
   const enabled = await getSetting(db, 'notify_email_enabled', '1') === '1';
@@ -21,10 +21,11 @@ export async function sendEmail(db: D1Database, subject: string, body: string): 
   } catch { return false; }
 }
 
-export async function sendWebhook(db: D1Database, text: string): Promise<boolean> {
+/** notify_wh_url 为加密存储，需 encKey 解密后才能请求。 */
+export async function sendWebhook(db: D1Database, text: string, encKey: string): Promise<boolean> {
   const enabled = await getSetting(db, 'notify_wh_enabled', '0') === '1';
   if (!enabled) return true;
-  const url = await getSetting(db, 'notify_wh_url', '');
+  const url = await getSettingPlain(db, 'notify_wh_url', encKey);
   const method = await getSetting(db, 'notify_wh_method', 'GET');
   if (!url) return true;
   try {

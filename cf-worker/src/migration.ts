@@ -1,7 +1,7 @@
 import type { MigrationExport } from './types';
 import { decrypt, encrypt, isEncrypted } from './crypto';
 import { encryptGroupSecrets } from './accounts';
-import { saveSetting } from './db';
+import { saveSetting, saveSettingSecret, SENSITIVE_SETTING_KEYS } from './db';
 
 export interface ImportOptions { skipPassword?: boolean; skipDefaults?: boolean; }
 
@@ -82,7 +82,16 @@ export async function importFromDocker(db: D1Database, encKey: string, data: Mig
 
 async function writeSettings(db: D1Database, data: MigrationExport, opts: ImportOptions, writtenKeys: Set<string>, encKey: string): Promise<void> {
   const s = data.settings;
-  const set = (k: string, v: string) => { writtenKeys.add(k); return saveSetting(db, k, v); };
+  // 与 PHP ConfigManager 对齐：敏感项加密落库；'********' 与空值视为「不修改」
+  const set = async (k: string, v: string) => {
+    writtenKeys.add(k);
+    if (SENSITIVE_SETTING_KEYS.has(k)) {
+      if (!v || v === '********') return;
+      await saveSettingSecret(db, k, v, encKey);
+      return;
+    }
+    await saveSetting(db, k, v);
+  };
 
   if (!opts.skipPassword) await set('admin_password', String(s.admin_password ?? ''));
   if (!opts.skipDefaults) await set('traffic_threshold', String(s.traffic_threshold ?? 95));

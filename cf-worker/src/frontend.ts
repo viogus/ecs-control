@@ -269,7 +269,8 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
       <div class="card">
         <h2>数据管理</h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-outline btn-sm" @click="doExport" :disabled="working">导出 JSON</button>
+          <button class="btn btn-outline btn-sm" @click="doExport" :disabled="working">导出 JSON（脱敏）</button>
+          <button class="btn btn-outline btn-sm" @click="doExportFull" :disabled="working">完整备份（含明文密钥）</button>
           <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">{{ importLabel }}<input type="file" accept=".json,application/json" @change="doImport" style="display:none" ref="importFile"></label>
           <span v-if="exportResult" style="font-size:13px;color:#86868b">{{ exportResult }}</span>
         </div>
@@ -485,7 +486,8 @@ createApp({
       this.working = true;
       try {
         const body = { ...this.cfg };
-        if (body.notify_password === '********') delete body.notify_password;
+        // 掩码字段（'********'）表示「不修改」，提交前剔除，避免把已存密钥覆盖成掩码
+        for (const k of Object.keys(body)) { if (body[k] === '********') delete body[k]; }
         const d = await this.api('/api/save-config', body);
         if (!d.success) { this.toastMsg(d.message || '保存失败', 'error'); return; }
         this.toastMsg('设置已保存','success');
@@ -553,10 +555,17 @@ createApp({
       } catch(ex) { this.toastMsg('文件读取或解析失败: ' + (ex.message||''), 'error'); }
       finally { this.importLabel = '导入 JSON'; e.target.value = ''; }
     },
-    async doExport() {
+    async doExport() { await this.runExport(false, ''); },
+    async doExportFull() {
+      const password = prompt('完整备份包含明文密钥（AccessKeySecret / SMTP 密码 / API Token），请输入管理员密码确认：');
+      if (!password) return;
+      await this.runExport(true, password);
+    },
+    async runExport(full, password) {
       this.working = true; this.exportResult = '';
       try {
-        const d = await this.api('/api/export');
+        const body = full ? { full: true, password } : {};
+        const d = await this.api('/api/export', body);
         if (d.warnings && d.warnings.length) {
           this.exportResult = d.warnings.join('; ');
           alert(d.warnings.join('\\n') + '\\n\\n请先修复密钥问题后再重新导出。');
