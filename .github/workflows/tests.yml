@@ -10,7 +10,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # tests/ 下的脚本是自建 harness(无 PHPUnit)，用官方镜像跑，避免额外 action 依赖
       - name: Install dependencies
