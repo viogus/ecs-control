@@ -280,7 +280,7 @@
                                     </div>
                                     <div class="summary-cell">
                                         <div class="summary-primary font-mono text-sm">{{ inst.publicIp || inst.privateIp || '-' }}</div>
-                                        <div v-if="inst.ipv6Address" class="mt-1 font-mono text-xs text-[#2563eb]">IPv6: {{ inst.ipv6Address }}</div>
+                                        <div v-if="inst.ipv6Address" class="summary-primary font-mono text-sm" :title="inst.ipv6Address">{{ inst.ipv6Address }}</div>
                                         <div class="summary-secondary">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</div>
                                     </div>
                                     <div class="summary-cell center-column">
@@ -331,7 +331,7 @@
                                     <div><span class="text-[var(--muted)]">区域</span><p class="mt-1">{{ inst.regionName }}</p></div>
                                     <div><span class="text-[var(--muted)]">状态</span><p class="mt-1"><span class="status-pill" :class="statusClass(inst.instanceStatus)">{{ statusText(inst.instanceStatus) }}</span></p></div>
                                     <div><span class="text-[var(--muted)]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</p></div>
-                                    <div v-if="inst.ipv6Address"><span class="text-[var(--muted)]">IPv6</span><p class="mt-1 font-mono text-xs text-[#2563eb]">{{ inst.ipv6Address }}</p></div>
+                                    <div v-if="inst.ipv6Address"><span class="text-[var(--muted)]">IPv6</span><p class="mt-1 font-mono text-xs">{{ inst.ipv6Address }}</p></div>
                                     <div><span class="text-[var(--muted)]">公网带宽峰值</span><p class="mt-1">{{ inst.internetMaxBandwidthOut ? inst.internetMaxBandwidthOut + ' Mbps' : '-' }}</p></div>
                                 </div>
                                 <div v-if="inst.operationLocked || inst.instanceStatus === 'Releasing'" class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-700">
