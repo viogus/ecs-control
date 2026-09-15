@@ -60,19 +60,21 @@ export async function getInstanceStatus(account: Account): Promise<string> {
 }
 
 export async function controlInstance(account: Account, action: 'start' | 'stop', shutdownMode = 'KeepCharging'): Promise<void> {
+  // 写操作不重试（maxAttempts=1）：请求可能已达服务端，重试会重复执行停机/开机
   await signedRequest({
     ...ak(account), endpoint: `ecs.${account.region_id}.aliyuncs.com`,
     action: action === 'stop' ? 'StopInstance' : 'StartInstance', version: '2014-05-26',
     params: { RegionId: account.region_id, InstanceId: account.instance_id, ...(action === 'stop' ? { StoppedMode: shutdownMode } : {}) },
-  });
+  }, 1);
 }
 
 export async function deleteInstance(account: Account): Promise<void> {
+  // 写操作不重试：避免重复删除
   await signedRequest({
     ...ak(account), endpoint: `ecs.${account.region_id}.aliyuncs.com`,
     action: 'DeleteInstance', version: '2014-05-26',
     params: { RegionId: account.region_id, InstanceId: account.instance_id, Force: 'true' },
-  });
+  }, 1);
 }
 
 // === CDT ===

@@ -32,6 +32,8 @@ export interface AccountGroup {
 // === API ===
 export interface TrafficResult {
   success: boolean; value: number | null; status: string; message: string;
+  /** 阿里云返回的错误码（无则说明请求未到达服务端） */
+  code?: string;
 }
 
 export interface EcsInstance {

@@ -82,9 +82,13 @@ export async function signAndCall(p: SignParams): Promise<Response> {
   });
 }
 
-export async function signedRequest(p: SignParams): Promise<Record<string, unknown>> {
+/**
+ * @param maxAttempts 总尝试次数。读操作可重试（幂等）；写操作应传 1：
+ *                    请求可能已达服务端，重试有重复执行风险（对齐 PHP RetryHandler 的语义）。
+ */
+export async function signedRequest(p: SignParams, maxAttempts = 3): Promise<Record<string, unknown>> {
   let lastErr: Error | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < Math.max(1, maxAttempts); attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
     try {
       const res = await signAndCall(p);
