@@ -1,4 +1,4 @@
-import type { Env, JwtPayload } from './types';
+import type { Account, Env, JwtPayload } from './types';
 import { verifyJwt, signJwt, verifyPassword, hashPassword, generateCsrfToken } from './auth';
 import {
   getAccounts, getSetting, getSettingPlain, getSettings, saveSetting, saveSettingsBulk,
@@ -7,14 +7,14 @@ import {
 import { runTrafficCheck } from './monitor';
 import { runScheduleCheck } from './schedules';
 import { syncDdns } from './ddns';
-import { doControl, doDelete } from './instance-actions';
-import { deleteInstance } from './aliyun-api';
+import { doControl, doDelete, doReplaceIp } from './instance-actions';
+import { deleteInstance, getRegions, getTraffic } from './aliyun-api';
 import { decrypt, encrypt, isEncrypted } from './crypto';
 import { buildPreview } from './ecs-create';
 import { importFromDocker } from './migration';
 import { renderHtml } from './frontend';
 import { syncAccountGroups, getGroupsFromSettings, mergeMaskedAccountGroupSecrets, encryptGroupSecrets } from './accounts';
-import { sendEmail, sendWebhook } from './notification';
+import { sendEmail, sendWebhook, notifyPublicIpChanged } from './notification';
 import { VUE_SOURCE } from './vue-source';
 import type { MigrationExport } from './types';
 
@@ -43,6 +43,7 @@ const WRITE_ACTIONS = new Set([
   'preview-create', 'disk-options', 'create-ecs',
   'clear-logs', 'send-test-email', 'send-test-tg', 'send-test-wh',
   'export', 'import', 'schedule', 'save-account', 'add-account', 'remove-account',
+  'test-account',
 ]);
 
 // === Route handlers (auth + body already processed) ===
@@ -142,8 +143,57 @@ async function handleRestoreSchedule(env: Env, body: any): Promise<Response> {
   return jsonResponse({ success: true });
 }
 
-async function handleReplaceIp(): Promise<Response> {
-  return jsonResponse({ success: false, message: 'CF Worker 版不支持更换公网 IP，请使用 Docker 版' });
+async function handleReplaceIp(env: Env, body: any): Promise<Response> {
+  const accountId = Number(body?.accountId ?? 0);
+  if (!accountId) return jsonResponse({ success: false, message: '缺少账号 ID' });
+  const result = await doReplaceIp(env.DB, env.ENCRYPTION_KEY, accountId);
+  if (!result.success) return jsonResponse({ success: false, message: result.message || '更换公网 IP 失败' });
+  // 与 PHP 一致：更换成功后同步 DDNS 并推送通知
+  try { await syncDdns(env.DB, await getAccounts(env.DB), env.ENCRYPTION_KEY); }
+  catch (e: any) { await addLog(env.DB, 'warning', `EIP 更换后 DDNS 同步失败: ${e.message}`); }
+  const acc = await getAccountById(env.DB, accountId);
+  if (acc) {
+    const notified = await notifyPublicIpChanged(env.DB, env.ENCRYPTION_KEY, result.label || '',
+      { instance_id: acc.instance_id, region_id: acc.region_id, instance_name: acc.instance_name },
+      result.oldIp || '', result.newIp || '',
+      '用户在控制台手动更换公网 IP，DDNS 解析已同步更新。');
+    if (!notified) await addLog(env.DB, 'warning', `公网 IP 变更通知推送失败 [${result.label || ''}]`);
+  }
+  return jsonResponse({ success: true, message: `公网 IP 已更换为 ${result.newIp || '-'}`, data: { publicIp: result.newIp || '' } });
+}
+
+/** 账号测试（对齐 PHP AccountGroupOperationService::testAccountCredentials） */
+async function handleTestAccount(env: Env, body: any): Promise<Response> {
+  const groupKey = String(body?.groupKey ?? '');
+  const groups = await getGroupsFromSettings(env.DB, env.ENCRYPTION_KEY);
+  const group = groups.find(g => g.groupKey === groupKey);
+  if (!group) return jsonResponse({ success: false, message: '账号组不存在' });
+  const label = group.remark || (group.AccessKeyId ? group.AccessKeyId.substring(0, 7) + '***' : 'unknown');
+  const account = {
+    access_key_id: group.AccessKeyId, access_key_secret: group.AccessKeySecret,
+    region_id: group.regionId, site_type: group.siteType,
+  } as Account;
+  try {
+    const regions = await getRegions(group.AccessKeyId, group.AccessKeySecret);
+    if (regions.length && !regions.some(r => r.regionId === group.regionId)) {
+      return jsonResponse({ success: false, message: '当前AK无法访问所选区域，请检查权限范围' });
+    }
+    let monitorWarning = '';
+    try { await getTraffic(account); }
+    catch (e: any) {
+      monitorWarning = `CDT 流量查询未通过：${e.message}`;
+      await addLog(env.DB, 'warning', `账号 CDT 探测异常 [${label}]: ${monitorWarning}`);
+    }
+    await addLog(env.DB, 'info', `账号测试成功 [${label}] ${group.regionId}`);
+    return jsonResponse({
+      success: true,
+      message: monitorWarning ? `AK可用，ECS API已接通；${monitorWarning}` : 'AK可用，ECS API已接通，CDT 接口已接通',
+      monitorWarning, monitorStatus: monitorWarning ? 'warning' : 'ok',
+    });
+  } catch (e: any) {
+    await addLog(env.DB, 'warning', `账号测试失败 [${label}]: ${e.message}`);
+    return jsonResponse({ success: false, message: e.message });
+  }
 }
 
 async function handlePreviewCreate(env: Env, body: any): Promise<Response> {
@@ -333,8 +383,27 @@ async function handleRemoveAccount(env: Env, body: any): Promise<Response> {
   return jsonResponse({ success: true });
 }
 
-async function handleUploadLogo(): Promise<Response> {
-  return jsonResponse({ success: false, message: 'CF Worker 版不支持 Logo 上传，请使用 Docker 版' });
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const LOGO_MIME_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+
+/**
+ * Logo 上传：CF 侧没有可写文件系统，改以 base64 存 D1（对齐 PHP AdminSupportService::uploadLogo 的类型与 2MB 限制）。
+ * 前端用 FileReader 转 data URL 后 POST 过来。
+ */
+async function handleUploadLogo(env: Env, body: any): Promise<Response> {
+  const dataUrl = String(body?.dataUrl ?? '');
+  const match = dataUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return jsonResponse({ success: false, message: '仅支持 PNG、JPG、WebP 图片' });
+  const mime = match[1];
+  const base64 = match[2];
+  const bytes = Math.floor(base64.length * 3 / 4);
+  if (bytes <= 0 || bytes > LOGO_MAX_BYTES) return jsonResponse({ success: false, message: 'Logo 图片大小需小于 2MB' });
+  const version = Math.floor(Date.now() / 1000);
+  const url = `api/brand-logo?v=${version}`;
+  await saveSetting(env.DB, 'app_logo_data', `${mime}|${base64}`);
+  await saveSetting(env.DB, 'AppLogoUrl', url);
+  await addLog(env.DB, 'info', '页面 Logo 已更新');
+  return jsonResponse({ success: true, url });
 }
 
 async function handleImport(env: Env, body: any): Promise<Response> {
@@ -356,10 +425,20 @@ const API_ROUTES: Record<string, Handler> = {
   'create-ecs': handleCreateEcs, 'send-test-email': handleSendTestEmail, 'send-test-tg': handleSendTestTg,
   'send-test-wh': handleSendTestWh, 'export': handleExport, 'schedule': handleSchedule,
   'save-account': handleSaveAccount, 'add-account': handleAddAccount, 'remove-account': handleRemoveAccount,
-  'upload-logo': handleUploadLogo, 'import': handleImport,
+  'upload-logo': handleUploadLogo, 'import': handleImport, 'test-account': handleTestAccount,
 };
 
 // === Main worker ===
+
+/** 品牌 Logo 响应：base64 存在 settings 里，公开可访问（对齐 PHP 的 brand_logo 公开接口） */
+async function brandLogoResponse(env: Env): Promise<Response> {
+  const raw = await getSetting(env.DB, 'app_logo_data', '');
+  const sep = raw.indexOf('|');
+  if (!raw || sep < 0) return jsonResponse({ error: 'Not found' }, 404);
+  const mime = raw.substring(0, sep);
+  const bytes = Uint8Array.from(atob(raw.substring(sep + 1)), c => c.charCodeAt(0));
+  return new Response(bytes, { headers: { 'Content-Type': mime, 'Cache-Control': 'public, max-age=86400' } });
+}
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -380,6 +459,11 @@ export default {
       return new Response(renderHtml(csrf), {
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
       });
+    }
+
+    // 品牌 Logo（公开，与 PHP 的 brand_logo 一致）
+    if (path === '/api/brand-logo' && req.method === 'GET') {
+      return brandLogoResponse(env);
     }
 
     // Public endpoints

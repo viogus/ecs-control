@@ -166,3 +166,114 @@ export async function getInstanceOutboundBytes(account: Account, startMs: number
   }
   return total;
 }
+
+// === EIP (VPC 2016-04-28) ===
+
+export interface EipInfo { allocationId: string; ipAddress: string; status: string }
+
+const VPC_VERSION = '2016-04-28';
+function vpcEndpoint(regionId: string): string { return `vpc.${regionId}.aliyuncs.com`; }
+
+/** 查询 EIP（AllocationId / IpAddress / EipName 等任一条件） */
+export async function describeEipAddresses(account: Account, params: Record<string, string>): Promise<EipInfo[]> {
+  const r = await signedRequest({
+    ...ak(account), endpoint: vpcEndpoint(account.region_id), action: 'DescribeEipAddresses', version: VPC_VERSION,
+    params: { RegionId: account.region_id, ...params },
+  });
+  const list = (r.EipAddresses as any)?.EipAddress ?? [];
+  return (list as any[]).map(e => ({
+    allocationId: String(e.AllocationId ?? ''), ipAddress: String(e.IpAddress ?? ''), status: String(e.Status ?? ''),
+  }));
+}
+
+/** 申请按量付费 EIP（写操作不重试：重复申请会多计费） */
+export async function allocateEipAddress(account: Account, bandwidth: number, name: string): Promise<EipInfo> {
+  const r = await signedRequest({
+    ...ak(account), endpoint: vpcEndpoint(account.region_id), action: 'AllocateEipAddress', version: VPC_VERSION,
+    params: {
+      RegionId: account.region_id, Bandwidth: Math.max(1, Math.floor(bandwidth)),
+      InternetChargeType: 'PayByTraffic', Name: `${name}-eip`,
+      'Tag.1.Key': 'ecs-control-managed', 'Tag.1.Value': 'true',
+    },
+  }, 1);
+  const allocationId = String(r.AllocationId ?? '');
+  if (!allocationId) throw new Error('EIP 申请成功但未返回 AllocationId');
+  return { allocationId, ipAddress: String(r.EipAddress ?? ''), status: 'Available' };
+}
+
+export async function associateEipAddress(account: Account, allocationId: string, instanceId: string): Promise<void> {
+  if (!allocationId || !instanceId) throw new Error('EIP 绑定参数缺失');
+  await signedRequest({
+    ...ak(account), endpoint: vpcEndpoint(account.region_id), action: 'AssociateEipAddress', version: VPC_VERSION,
+    params: { RegionId: account.region_id, AllocationId: allocationId, InstanceId: instanceId, InstanceType: 'EcsInstance' },
+  }, 1);
+}
+
+/** 解绑 EIP；IncorrectEipStatus / InvalidAllocationId.NotFound 视为已解绑（幂等，对齐 PHP 实现） */
+export async function unassociateEipAddress(account: Account, allocationId: string, instanceId: string): Promise<void> {
+  if (!allocationId) return;
+  const params: Record<string, string> = { RegionId: account.region_id, AllocationId: allocationId, InstanceType: 'EcsInstance' };
+  if (instanceId) params.InstanceId = instanceId;
+  try {
+    await signedRequest({
+      ...ak(account), endpoint: vpcEndpoint(account.region_id), action: 'UnassociateEipAddress', version: VPC_VERSION, params,
+    }, 1);
+  } catch (e: any) {
+    const msg = String(e?.message ?? '');
+    if (msg.includes('IncorrectEipStatus') || msg.includes('InvalidAllocationId.NotFound')) return;
+    throw e;
+  }
+}
+
+export async function releaseEipAddress(account: Account, allocationId: string): Promise<void> {
+  if (!allocationId) return;
+  await signedRequest({
+    ...ak(account), endpoint: vpcEndpoint(account.region_id), action: 'ReleaseEipAddress', version: VPC_VERSION,
+    params: { RegionId: account.region_id, AllocationId: allocationId },
+  }, 1);
+}
+
+/** 清理失败不掩盖原始异常（对齐 PHP releaseEipAddressSilently） */
+export async function releaseEipAddressSilently(account: Account, allocationId: string): Promise<void> {
+  try { await releaseEipAddress(account, allocationId); } catch { /* ignore */ }
+}
+
+/** 轮询 EIP 状态直到期望值；返回命中的详情或 null */
+export async function waitEipStatus(account: Account, allocationId: string, expected: string, tries: number): Promise<EipInfo | null> {
+  for (let i = 0; i < tries; i++) {
+    const rows = await describeEipAddresses(account, { AllocationId: allocationId }).catch(() => [] as EipInfo[]);
+    const hit = rows.find(r => r.allocationId === allocationId);
+    if (hit && hit.status === expected) return hit;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return null;
+}
+
+/**
+ * 更换系统托管 EIP：申请新 EIP → 解绑旧 → 等 Available → 绑定新 → 等 InUse → 释放旧。
+ * 中途失败会释放已申请的新 EIP，避免产生闲置计费（对齐 PHP AliyunService::replaceManagedEip）。
+ */
+export async function replaceManagedEip(account: Account): Promise<EipInfo> {
+  if (account.public_ip_mode !== 'eip' || !account.eip_managed || !account.eip_allocation_id) {
+    throw new Error('当前实例不是系统托管 EIP，无法更换公网 IP');
+  }
+  const bandwidth = Math.max(1, Number(account.internet_max_bandwidth_out || 100));
+  const name = account.instance_name || account.instance_id;
+  const newEip = await allocateEipAddress(account, bandwidth, `${name}-replace`);
+  try {
+    await unassociateEipAddress(account, account.eip_allocation_id, account.instance_id);
+    await waitEipStatus(account, account.eip_allocation_id, 'Available', 8);
+    await associateEipAddress(account, newEip.allocationId, account.instance_id);
+    await waitEipStatus(account, newEip.allocationId, 'InUse', 12);
+    await releaseEipAddress(account, account.eip_allocation_id);
+  } catch (e) {
+    await releaseEipAddressSilently(account, newEip.allocationId);
+    throw e;
+  }
+  let ip = newEip.ipAddress;
+  if (!ip) {
+    const detail = await waitEipStatus(account, newEip.allocationId, 'InUse', 6);
+    ip = detail?.ipAddress ?? '';
+  }
+  return { allocationId: newEip.allocationId, ipAddress: ip, status: 'InUse' };
+}

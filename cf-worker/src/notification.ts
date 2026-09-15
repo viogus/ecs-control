@@ -33,3 +33,23 @@ export async function sendWebhook(db: D1Database, text: string, encKey: string):
     return res.ok;
   } catch { return false; }
 }
+
+/** 公网 IP 变更通知（对齐 PHP NotificationService::notifyPublicIpChanged） */
+export async function notifyPublicIpChanged(
+  db: D1Database, encKey: string, label: string,
+  account: { instance_id?: string; region_id?: string; instance_name?: string },
+  oldIp: string, newIp: string, reason: string
+): Promise<boolean> {
+  const body = [
+    '【ECS 服务器管家】公网 IP 已更换',
+    `账号: ${label}`,
+    `实例编号: ${account.instance_id || '-'}`,
+    `区域: ${account.region_id || '-'}`,
+    `原公网 IP: ${oldIp || '-'}`,
+    `新公网 IP: ${newIp || '-'}`,
+    `说明: ${reason}`,
+  ].join('\n');
+  const mailOk = await sendEmail(db, '公网 IP 已更换', body);
+  const whOk = await sendWebhook(db, body, encKey);
+  return mailOk && whOk;
+}
