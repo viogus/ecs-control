@@ -75,7 +75,10 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
   <!-- Admin Panel -->
   <div v-else>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h1>ECS 服务器管家</h1>
+      <div style="display:flex;align-items:center;gap:10px">
+        <img v-if="cfg.AppLogoUrl" :src="cfg.AppLogoUrl" alt="logo" style="height:32px;width:auto;border-radius:6px">
+        <h1 style="margin:0">ECS 服务器管家</h1>
+      </div>
       <button class="btn btn-outline btn-sm" @click="doLogout">退出</button>
     </div>
 
@@ -100,6 +103,7 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
           <div style="display:flex;gap:6px">
             <button v-if="inst.instance_status==='Running'" class="btn btn-outline btn-sm" @click="doControl(inst.id,'stop')">停机</button>
             <button v-if="inst.instance_status==='Stopped'" class="btn btn-primary btn-sm" @click="doControl(inst.id,'start')">开机</button>
+            <button v-if="canReplaceIp(inst)" class="btn btn-outline btn-sm" @click="replaceIp(inst)" :disabled="working">更换 IP</button>
             <button v-if="inst.instance_status==='Running'||inst.instance_status==='Stopped'" class="btn btn-danger btn-sm" @click="confirmDelete(inst)">释放</button>
           </div>
         </div>
@@ -146,6 +150,7 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
           <strong>{{ inst.remark || inst.instance_name || inst.instance_id }}</strong>
           <div style="display:flex;gap:6px;align-items:center">
             <span v-if="inst.schedule_blocked_by_traffic" style="color:#ff3b30;font-size:12px">流量熔断</span>
+            <button class="btn btn-outline btn-sm" style="font-size:11px;padding:2px 8px" @click="testAccount(inst)" :disabled="working">测试账号</button>
             <button class="btn btn-danger btn-sm" style="font-size:11px;padding:2px 8px" @click="doRemoveAccount(inst)">删除</button>
           </div>
         </div>
@@ -267,6 +272,15 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
       </div>
 
       <div class="card">
+        <h2>页面 Logo</h2>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <img v-if="cfg.AppLogoUrl" :src="cfg.AppLogoUrl" alt="logo" style="height:36px;width:auto;border-radius:6px;border:1px solid #e5e5ea">
+          <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">上传 Logo（PNG/JPG/WebP，≤2MB）<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadLogo" style="display:none"></label>
+        </div>
+        <p style="font-size:12px;color:#86868b;margin-top:8px">Logo 以 base64 存于 D1（CF 版无文件系统），上传后立即生效。</p>
+      </div>
+
+      <div class="card">
         <h2>数据管理</h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" @click="doExport" :disabled="working">导出 JSON（脱敏）</button>
@@ -310,6 +324,7 @@ createApp({
       notify_email_enabled: '1', notify_email: '', notify_host: '', notify_port: '465',
       notify_username: '', notify_password: '', notify_secure: 'ssl',
       notify_wh_enabled: '0', notify_wh_url: '', notify_wh_method: 'GET',
+      AppLogoUrl: '',
     },
 
     // DDNS
@@ -541,6 +556,49 @@ createApp({
         this.toastMsg(d.message || '已发送', d.success ? 'success' : 'error');
       } catch(e) { this.toastMsg('发送失败','error'); }
       finally { this.working = false; }
+    },
+    canReplaceIp(inst) {
+      return inst.public_ip_mode === 'eip' && !!inst.eip_managed && !!inst.eip_allocation_id
+        && (inst.instance_status === 'Running' || inst.instance_status === 'Stopped');
+    },
+    async replaceIp(inst) {
+      if (!confirm('确认更换该实例的公网 IP？将申请新的 EIP 并释放旧的，期间公网会短暂中断。')) return;
+      this.working = true;
+      try {
+        const d = await this.api('/api/replace-ip', { accountId: inst.id });
+        if (!d.success) { this.toastMsg(d.message || '更换失败', 'error'); return; }
+        this.toastMsg(d.message || '公网 IP 已更换', 'success');
+        await this.fetchInstances();
+      } catch(e) { this.toastMsg('更换公网 IP 失败','error'); }
+      finally { this.working = false; }
+    },
+    async testAccount(inst) {
+      if (!inst.group_key) { this.toastMsg('该实例未归属账号组，无法测试', 'error'); return; }
+      this.working = true;
+      try {
+        const d = await this.api('/api/test-account', { groupKey: inst.group_key });
+        this.toastMsg(d.message || (d.success ? '账号可用' : '测试失败'), d.success ? 'success' : 'error');
+      } catch(e) { this.toastMsg('测试失败','error'); }
+      finally { this.working = false; }
+    },
+    async uploadLogo(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { this.toastMsg('Logo 图片大小需小于 2MB', 'error'); e.target.value = ''; return; }
+      this.working = true;
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(fr.result);
+          fr.onerror = reject;
+          fr.readAsDataURL(file);
+        });
+        const d = await this.api('/api/upload-logo', { dataUrl });
+        if (!d.success) { this.toastMsg(d.message || '上传失败', 'error'); return; }
+        this.cfg.AppLogoUrl = d.url || '';
+        this.toastMsg('页面 Logo 已更新','success');
+      } catch(ex) { this.toastMsg('上传失败','error'); }
+      finally { this.working = false; e.target.value = ''; }
     },
     async doImport(e) {
       const file = e.target.files[0];
