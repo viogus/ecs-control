@@ -616,46 +616,68 @@ function test_traffic_recovery_clears_manual_override(): void
 
 test_traffic_recovery_clears_manual_override();
 
-// ---- 手动放行只免除熔断，不改变定时计划 ----
+// ---- 超限时：自动关机照常，自动开机禁止 ----
 
-function test_scheduled_stop_still_runs_while_manually_overridden(): void
+function test_scheduled_stop_runs_even_over_threshold(): void
 {
     $db = new FakeMonitorDb();
     $config = new FakeMonitorConfig();
-    $config->manualOverride = true;
     $aliyun = new FakeMonitorAliyun();
     $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
 
-    // 放行期间流量仍超阈值：定时计划不受影响，到点照样停机
+    // 流量超限：定时停机照常执行（「但自动关机」）
     $account = scheduled_account(['instance_status' => 'Running']);
     $state = scheduled_state(['status' => 'Running', 'requiresTrafficProtection' => true]);
 
     invoke_monitor_scheduled_ops($service, $account, strtotime('2026-09-16 23:00:10'), 'KeepCharging', $state);
 
-    assert_same_monitor(1, $aliyun->controlCalls, 'scheduled stop must still run while manually overridden');
+    assert_same_monitor(1, $aliyun->controlCalls, 'scheduled stop must still run while over the traffic limit');
     assert_same_monitor(true, in_array('定时停机', $state['actions'], true), 'action should record the scheduled stop');
     assert_same_monitor(1, count($config->executionStates), 'the day window should be consumed by a real stop');
 }
 
-test_scheduled_stop_still_runs_while_manually_overridden();
+test_scheduled_stop_runs_even_over_threshold();
 
-function test_scheduled_stop_skipped_when_over_threshold_without_override(): void
+function test_scheduled_start_blocked_while_over_threshold(): void
 {
     $db = new FakeMonitorDb();
     $config = new FakeMonitorConfig();
     $aliyun = new FakeMonitorAliyun();
     $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
 
-    // 未放行且流量超阈值：熔断优先，定时计划让位（此前的行为保持不变）
-    $account = scheduled_account(['instance_status' => 'Running']);
-    $state = scheduled_state(['status' => 'Running', 'requiresTrafficProtection' => true]);
+    // 流量超限 + 到点定时开机：必须禁止（只能手动开机），且不占用当天窗口以便流量回落后补开
+    $account = scheduled_account(['instance_status' => 'Stopped', 'auto_start_blocked' => 0]);
+    $state = scheduled_state(['status' => 'Stopped', 'requiresTrafficProtection' => true]);
 
-    invoke_monitor_scheduled_ops($service, $account, strtotime('2026-09-16 23:00:10'), 'KeepCharging', $state);
+    invoke_monitor_scheduled_ops($service, $account, strtotime('2026-09-16 08:00:10'), 'KeepCharging', $state);
 
-    assert_same_monitor(0, $aliyun->controlCalls, 'without override the breaker must win over the schedule');
-    assert_same_monitor(0, count($config->executionStates), 'no day window consumption when the schedule is blocked');
+    assert_same_monitor(0, $aliyun->controlCalls, 'auto-start must be blocked while over the traffic limit');
+    assert_same_monitor(0, count($config->executionStates), 'a blocked auto-start must not consume the day window');
+
+    // 手动放行（手动开机）不会放宽这条禁令：超限期间定时开机依旧禁止
+    $config->manualOverride = true;
+    $state2 = scheduled_state(['status' => 'Stopped', 'requiresTrafficProtection' => true]);
+    invoke_monitor_scheduled_ops($service, $account, strtotime('2026-09-16 08:00:10'), 'KeepCharging', $state2);
+    assert_same_monitor(0, $aliyun->controlCalls, 'manual override must not re-enable scheduled auto-start');
 }
 
-test_scheduled_stop_skipped_when_over_threshold_without_override();
+test_scheduled_start_blocked_while_over_threshold();
+
+function test_scheduled_start_runs_when_within_limit(): void
+{
+    $db = new FakeMonitorDb();
+    $aliyun = new FakeMonitorAliyun();
+    $service = new MonitorService($db, new FakeMonitorConfig(), $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    // 未超限：定时开机照常执行
+    $account = scheduled_account(['instance_status' => 'Stopped', 'auto_start_blocked' => 0]);
+    $state = scheduled_state(['status' => 'Stopped', 'requiresTrafficProtection' => false]);
+
+    invoke_monitor_scheduled_ops($service, $account, strtotime('2026-09-16 08:00:10'), 'KeepCharging', $state);
+
+    assert_same_monitor(1, $aliyun->controlCalls, 'scheduled start should run when traffic is within limits');
+}
+
+test_scheduled_start_runs_when_within_limit();
 
 echo "MonitorService tests passed\n";

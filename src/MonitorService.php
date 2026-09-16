@@ -570,8 +570,9 @@ class MonitorService
 
     /**
      * 该账号组是否处于「手动放行」状态（流量熔断停机后用户手动开机）。
-     * 放行期间熔断类自动干预（超阈值自动停机）不再生效，定时开关机/保活/月度自启
-     * 恢复按计划执行 —— 即「手动开机只免除熔断，不改变定时计划」。
+     * 仅用于熔断层：放行期间不再因超限而自动停机（避免手动开机后被立刻关掉）。
+     * 注意：自动开机（定时开机/保活/月度自启）在超限期间一律禁止，与放行无关 ——
+     * 即「只要超限，就得手动开机，但自动关机」。
      */
     private function isTrafficManuallyOverridden(array $s): bool
     {
@@ -589,14 +590,15 @@ class MonitorService
         $stopTime = trim((string) ($account->stopTime ?? ''));
         $today = date('Y-m-d', $currentTime);
 
-        // 手动放行期间：超阈值不再挡住定时计划 —— 放行只免除流量熔断，不改变定时开关机
-        $scheduleAllowed = $scheduleEnabled
-            && !$s['scheduleBlockedByTraffic']
-            && (!($s['requiresTrafficProtection'] ?? false) || $this->isTrafficManuallyOverridden($s));
+        // 超限（熔断中或已被阻塞）时：自动**关机**照常执行，但一切自动**开机**必须让位给手动开机。
+        // 即「只要超限，就得手动开机，但自动关机」—— 定时开机/保活/月度自启都因此被禁止。
+        $overLimit = ($s['requiresTrafficProtection'] ?? false) || !empty($s['scheduleBlockedByTraffic']);
+        $scheduleStopAllowed = $scheduleEnabled;
+        $scheduleStartAllowed = $scheduleEnabled && !$overLimit;
         $isStableState = !in_array($s['status'], [InstanceStatus::Starting->value, InstanceStatus::Stopping->value, InstanceStatus::Pending->value, InstanceStatus::Releasing->value, InstanceStatus::Released->value], true);
 
-        // 定时停机
-        if ($scheduleAllowed && $scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account->scheduleLastStopDate ?? '')) {
+        // 定时停机（超限不豁免：到点照样自动关）
+        if ($scheduleStopAllowed && $scheduleStopEnabled && $this->shouldRunScheduleAt($currentTime, $stopTime, $account->scheduleLastStopDate ?? '')) {
             if ($isStableState && $s['status'] === InstanceStatus::Running->value) {
                 if ($this->safeControlInstance($account, 'stop', $shutdownMode)) {
                     $s['actions'][] = "定时停机";
@@ -628,8 +630,8 @@ class MonitorService
             }
         }
 
-        // 定时开机
-        if ($scheduleAllowed && $scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account->scheduleLastStartDate ?? '')) {
+        // 定时开机（超限时禁止：只能手动开机）
+        if ($scheduleStartAllowed && $scheduleStartEnabled && $this->shouldRunScheduleAt($currentTime, $startTime, $account->scheduleLastStartDate ?? '')) {
             if ($isStableState && $s['status'] === InstanceStatus::Stopped->value) {
                 if ($this->safeControlInstance($account, 'start')) {
                     $s['actions'][] = "定时开机";
@@ -665,7 +667,7 @@ class MonitorService
     private function handleMonthlyAutoStart($account, int $currentTime, bool $monthlyAutoStart, array &$s): void
     {
         $autoStartBlocked = !empty($account->autoStartBlocked);
-        if (!$monthlyAutoStart || $autoStartBlocked || (($s['requiresTrafficProtection'] ?? false) && !$this->isTrafficManuallyOverridden($s)) || $s['scheduleBlockedByTraffic'] || date('j', $currentTime) !== '1') {
+        if (!$monthlyAutoStart || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic'] || date('j', $currentTime) !== '1') {
             return;
         }
 
@@ -722,7 +724,7 @@ class MonitorService
     private function handleKeepAlive($account, int $currentTime, bool $keepAlive, array &$s): void
     {
         $autoStartBlocked = !empty($account->autoStartBlocked);
-        if (!$keepAlive || $autoStartBlocked || (($s['requiresTrafficProtection'] ?? false) && !$this->isTrafficManuallyOverridden($s)) || $s['scheduleBlockedByTraffic']) {
+        if (!$keepAlive || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic']) {
             return;
         }
 
