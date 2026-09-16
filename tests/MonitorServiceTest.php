@@ -78,6 +78,36 @@ final class FakeMonitorConfig
     {
         return $this->settings[$key] ?? $default;
     }
+
+    // ---- 定时开关机相关调用的桩(供断言) ----
+    public array $executionStates = [];
+    public array $autoStartBlocked = [];
+    public array $restoredGroups = [];
+
+    public function updateScheduleExecutionState($id, $type, $date): void
+    {
+        $this->executionStates[] = ['id' => $id, 'type' => $type, 'date' => $date];
+    }
+
+    public function updateAutoStartBlocked($id, $blocked): void
+    {
+        $this->autoStartBlocked[] = ['id' => $id, 'blocked' => $blocked];
+    }
+
+    public function restoreScheduleAfterTrafficBlock($groupKey): bool
+    {
+        $this->restoredGroups[] = $groupKey;
+        return true;
+    }
+
+    public function updateAccountStatus($id, $traffic, $status, $updatedAt, $metadata = []): bool
+    {
+        return true;
+    }
+
+    public function updateLastKeepAlive($id, $time): void
+    {
+    }
 }
 
 final class FakeMonitorAliyun
@@ -167,6 +197,13 @@ function invoke_monitor_traffic_breaker(MonitorService $service, Account $accoun
     $method = new ReflectionMethod(MonitorService::class, 'handleTrafficCircuitBreaker');
     $method->setAccessible(true);
     return $method->invokeArgs($service, [$account, $currentTime, 95, 'KeepCharging', 'stop_and_notify', &$state, 600]);
+}
+
+function invoke_monitor_scheduled_ops(MonitorService $service, Account $account, int $currentTime, string $shutdownMode, array &$state): void
+{
+    $method = new ReflectionMethod(MonitorService::class, 'handleScheduledOps');
+    $method->setAccessible(true);
+    $method->invokeArgs($service, [$account, $currentTime, $shutdownMode, &$state]);
 }
 
 function test_keep_alive_skips_when_schedule_is_blocked_by_protection(): void
@@ -431,5 +468,86 @@ function test_short_cdt_failure_keeps_normal_breaker_path(): void
 }
 
 test_short_cdt_failure_keeps_normal_breaker_path();
+
+// ---- 定时开关机 × 保活 的冲突修复 ----
+
+function scheduled_account(array $overrides = []): Account
+{
+    return Account::fromDbRow(array_merge([
+        'id' => 1, 'access_key_id' => 'AKIDSCHED00001', 'access_key_secret' => 'secret',
+        'region_id' => 'cn-hongkong', 'instance_id' => 'i-sched',
+        'instance_status' => 'Running',
+        'schedule_enabled' => 1, 'schedule_start_enabled' => 1, 'schedule_stop_enabled' => 1,
+        'start_time' => '08:00', 'stop_time' => '23:00',
+    ], $overrides));
+}
+
+function scheduled_state(array $overrides = []): array
+{
+    return array_merge([
+        'accountLabel' => 'hk2', 'status' => 'Running', 'traffic' => 0.0, 'actions' => [],
+        'apiStatusLog' => '', 'requiresTrafficProtection' => false, 'scheduleBlockedByTraffic' => false,
+        'protectionSuspended' => false, 'protectionSuspendReason' => '', 'protectionSuspendNotifiedAt' => 0,
+        'accountGroupKey' => 'gk1',
+    ], $overrides);
+}
+
+function test_keep_alive_skips_inside_scheduled_stop_window(): void
+{
+    $db = new FakeMonitorDb();
+    $aliyun = new FakeMonitorAliyun();
+    $service = new MonitorService($db, new FakeMonitorConfig(), $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+    $account = scheduled_account(['instance_status' => 'Stopped', 'auto_start_blocked' => 0]);
+
+    // 23:00 停机、08:00 开机 → 23:30 处于停机时段内，不得保活拉起
+    $inside = scheduled_state(['status' => 'Stopped']);
+    invoke_monitor_keep_alive($service, $account, strtotime('2026-09-16 23:30:00'), true, $inside);
+    assert_same_monitor(0, $aliyun->controlCalls, 'keep-alive must not start the instance inside the stop window');
+    assert_same_monitor(true, strpos($inside['apiStatusLog'], '停机时段') !== false, 'status log should explain the skip');
+
+    // 12:00 不在停机时段，保活照常
+    $outside = scheduled_state(['status' => 'Stopped']);
+    invoke_monitor_keep_alive($service, $account, strtotime('2026-09-16 12:00:00'), true, $outside);
+    assert_same_monitor(1, $aliyun->controlCalls, 'keep-alive should still start outside the stop window');
+}
+
+test_keep_alive_skips_inside_scheduled_stop_window();
+
+function test_scheduled_stop_does_not_consume_window_in_transient_state(): void
+{
+    $db = new FakeMonitorDb();
+    $aliyun = new FakeMonitorAliyun();
+    $config = new FakeMonitorConfig();
+    $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    // 到点 23:00 时实例还在 Starting（例如刚被保活拉起）：不得标记当天已执行，须留待宽限窗口内重试
+    $account = scheduled_account(['instance_status' => 'Starting']);
+    $state = scheduled_state(['status' => 'Starting']);
+    invoke_monitor_scheduled_ops($service, $account, strtotime('2026-09-16 23:00:10'), 'KeepCharging', $state);
+
+    assert_same_monitor(0, count($config->executionStates), 'transient state must not consume the day window');
+    assert_same_monitor(true, strpos($state['apiStatusLog'], '待重试') !== false, 'status log should mention the retry');
+    assert_same_monitor(0, $aliyun->controlCalls, 'no stop call while in transient state');
+}
+
+test_scheduled_stop_does_not_consume_window_in_transient_state();
+
+function test_traffic_recovery_auto_restores_schedule_block(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $service = new MonitorService($db, $config, new FakeMonitorAliyun(), new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    $account = scheduled_account(['max_traffic' => 1000.0, 'traffic_used' => 10.0, 'updated_at' => time()]);
+    $state = scheduled_state(['scheduleBlockedByTraffic' => true]);
+
+    invoke_monitor_traffic_breaker($service, $account, time(), $state);
+
+    assert_same_monitor(1, count($config->restoredGroups), 'traffic recovery should clear the schedule block automatically');
+    assert_same_monitor('gk1', $config->restoredGroups[0], 'restore should target the account group');
+    assert_same_monitor(false, $state['scheduleBlockedByTraffic'], 'this round should no longer be treated as blocked');
+}
+
+test_traffic_recovery_auto_restores_schedule_block();
 
 echo "MonitorService tests passed\n";

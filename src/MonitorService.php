@@ -353,6 +353,14 @@ class MonitorService
         $s['trafficUsagePercent'] = $usagePercent;
         $s['trafficAccountUsed'] = $accountTraffic;
 
+        // 流量已回落到阈值内:自动解除「流量熔断」对定时开关机的阻塞(对齐 cf-worker 的 monitor.ts),
+        // 否则定时开关机会一直被静默阻塞,直到跨自然月或用户手动点「恢复定时」。
+        if (!$requiresTrafficProtection && !empty($s['scheduleBlockedByTraffic'])) {
+            $this->configManager->restoreScheduleAfterTrafficBlock($s['accountGroupKey']);
+            $s['scheduleBlockedByTraffic'] = false;
+            $this->db->addLog('info', "流量已回落，自动恢复定时开关机 [{$s['accountLabel']}]");
+        }
+
         if (!$requiresTrafficProtection) {
             return false;
         }
@@ -578,13 +586,18 @@ class MonitorService
                     $s['apiStatusLog'] .= " [定时停机失败]";
                 }
             } else {
-                // 实例已停止或正处于过渡态:仅在过渡态(停机指令可能已发出)设置保活阻塞;
-                // 已停止的实例不设 block,否则未配置定时开机时保活会被永久阻塞
-                if ($s['status'] !== InstanceStatus::Stopped->value) {
+                // 实例已停止:目标已达成,标记当天已执行。
+                // 过渡态/Unknown 则不写 last_stop_date,留到下一分钟状态稳定后重试 ——
+                // 否则「保活刚把实例拉起、到点仍是 Starting」这类情况会把当天窗口一次性消耗掉,
+                // 导致当天再也不停机。
+                if ($s['status'] === InstanceStatus::Stopped->value) {
+                    $this->configManager->updateScheduleExecutionState($account->id, 'stop', $today);
+                } else {
+                    // 过渡态(停机指令可能已发出)设置保活阻塞;已停止的不设,否则未配定时开机时保活会被永久阻塞
                     $this->configManager->updateAutoStartBlocked($account->id, true);
                     $account->autoStartBlocked = true;
+                    $s['apiStatusLog'] .= ' [定时停机待重试:' . $s['status'] . ']';
                 }
-                $this->configManager->updateScheduleExecutionState($account->id, 'stop', $today);
             }
         }
 
@@ -609,7 +622,13 @@ class MonitorService
             } else {
                 $this->configManager->updateAutoStartBlocked($account->id, false);
                 $account->autoStartBlocked = false;
-                $this->configManager->updateScheduleExecutionState($account->id, 'start', $today);
+                if ($s['status'] === InstanceStatus::Running->value) {
+                    // 已经处于运行态:目标已达成,标记当天已执行
+                    $this->configManager->updateScheduleExecutionState($account->id, 'start', $today);
+                } else {
+                    // 过渡态/Unknown 不写 last_start_date,留到宽限窗口内的下一分钟重试
+                    $s['apiStatusLog'] .= ' [定时开机待重试:' . $s['status'] . ']';
+                }
             }
         }
     }
@@ -643,10 +662,46 @@ class MonitorService
 
     // ---- Phase 5: 保活逻辑 ----
 
+    /**
+     * 是否处于「定时停机时段」(stop_time → start_time，支持跨夜)。
+     * 该时段内不保活：否则会把按计划停下的实例重新拉起；更糟的是拉起后状态处于过渡态，
+     * 会让定时停机因「状态不符」而错过当天的执行窗口。
+     * 与 cf-worker/src/schedules.ts 的 inStopWindow() 同款判定。
+     */
+    private function inScheduleStopWindow($account, int $currentTime): bool
+    {
+        if (empty($account->scheduleEnabled) || empty($account->scheduleStartEnabled) || empty($account->scheduleStopEnabled)) {
+            return false;
+        }
+
+        $startTime = trim((string) ($account->startTime ?? ''));
+        $stopTime = trim((string) ($account->stopTime ?? ''));
+        if (!preg_match('/^\d{2}:\d{2}$/', $startTime) || !preg_match('/^\d{2}:\d{2}$/', $stopTime)) {
+            return false;
+        }
+
+        $stopMinutes = $this->timeToMinutes($stopTime);
+        $startMinutes = $this->timeToMinutes($startTime);
+        $currentMinutes = (int) date('G', $currentTime) * 60 + (int) date('i', $currentTime);
+
+        if ($stopMinutes < $startMinutes) {
+            return $currentMinutes >= $stopMinutes && $currentMinutes < $startMinutes;
+        }
+
+        // 跨夜:例如 23:00 停机、07:00 开机
+        return $currentMinutes >= $stopMinutes || $currentMinutes < $startMinutes;
+    }
+
     private function handleKeepAlive($account, int $currentTime, bool $keepAlive, array &$s): void
     {
         $autoStartBlocked = !empty($account->autoStartBlocked);
         if (!$keepAlive || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic']) {
+            return;
+        }
+
+        // 停机时段内不保活:否则会把刚按计划停下的实例重新拉起
+        if ($this->inScheduleStopWindow($account, $currentTime)) {
+            $s['apiStatusLog'] .= ' [停机时段,跳过保活]';
             return;
         }
 
