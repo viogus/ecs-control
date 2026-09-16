@@ -43,6 +43,17 @@ class InstanceActionService
                 $newStatus = $action === 'stop' ? InstanceStatus::Stopping->value : InstanceStatus::Starting->value;
                 $this->configManager->updateAccountStatus($accountId, $targetAccount->trafficUsed, $newStatus, time());
                 $this->configManager->updateAutoStartBlocked($accountId, $action === 'stop');
+
+                // 手动开机＝放行：若该实例正因流量熔断被阻塞，说明用户已知晓并接受继续运行，
+                // 于是解除定时/保活阻塞并记下放行标记（流量回落后自动失效，下次再超阈值恢复熔断）。
+                if ($action === 'start' && !empty($targetAccount->scheduleBlockedByTraffic)) {
+                    $groupKey = $targetAccount->groupKey
+                        ?: AccountSyncService::buildGroupKey($targetAccount->accessKeyId, $targetAccount->regionId);
+                    $this->configManager->restoreScheduleAfterTrafficBlock($groupKey);
+                    $this->configManager->setTrafficManualOverride($groupKey);
+                    $targetAccount->scheduleBlockedByTraffic = false;
+                    $this->db->addLog('info', "手动开机已放行，暂停自动流量熔断 [{$label}]");
+                }
                 if ($onStatusChanged) {
                     $onStatusChanged($targetAccount, $targetAccount->instanceStatus, $newStatus, '用户手动操作。');
                 }

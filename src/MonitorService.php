@@ -353,15 +353,29 @@ class MonitorService
         $s['trafficUsagePercent'] = $usagePercent;
         $s['trafficAccountUsed'] = $accountTraffic;
 
-        // 流量已回落到阈值内:自动解除「流量熔断」对定时开关机的阻塞(对齐 cf-worker 的 monitor.ts),
-        // 否则定时开关机会一直被静默阻塞,直到跨自然月或用户手动点「恢复定时」。
-        if (!$requiresTrafficProtection && !empty($s['scheduleBlockedByTraffic'])) {
-            $this->configManager->restoreScheduleAfterTrafficBlock($s['accountGroupKey']);
-            $s['scheduleBlockedByTraffic'] = false;
-            $this->db->addLog('info', "流量已回落，自动恢复定时开关机 [{$s['accountLabel']}]");
-        }
+        // 手动放行:用户在熔断停机后手动开机,表示已知晓并接受继续运行 —— 放行期间不再自动停机
+        $groupKey = (string) ($s['accountGroupKey'] ?? '');
+        $manualOverride = $this->configManager->hasTrafficManualOverride($groupKey);
 
         if (!$requiresTrafficProtection) {
+            // 流量已回落到阈值内:清除手动放行标记(下次再超阈值时恢复熔断),
+            // 并自动解除「流量熔断」对定时开关机的阻塞(对齐 cf-worker 的 monitor.ts),
+            // 否则定时开关机会一直被静默阻塞,直到跨自然月或用户手动点「恢复定时」。
+            if ($manualOverride) {
+                $this->configManager->clearTrafficManualOverride($groupKey);
+                $this->db->addLog('info', "流量已回落，取消手动放行 [{$s['accountLabel']}]");
+            }
+            if (!empty($s['scheduleBlockedByTraffic'])) {
+                $this->configManager->restoreScheduleAfterTrafficBlock($groupKey);
+                $s['scheduleBlockedByTraffic'] = false;
+                $this->db->addLog('info', "流量已回落，自动恢复定时开关机 [{$s['accountLabel']}]");
+            }
+            return false;
+        }
+
+        // 超阈值但处于手动放行状态:跳过自动停机(流量数据与告警照常记录)
+        if ($manualOverride) {
+            $s['apiStatusLog'] .= ' [已手动放行,跳过自动停机]';
             return false;
         }
 

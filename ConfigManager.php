@@ -636,6 +636,42 @@ class ConfigManager
         return $result;
     }
 
+    /**
+     * 手动放行标记：流量超阈值被熔断停机后，用户手动开机表示「已知晓，暂不要再自动停机」。
+     * 标记存在期间熔断层跳过自动停机；流量回落到阈值内后由 MonitorService 清除，
+     * 下次再超阈值时恢复正常熔断。
+     */
+    public function setTrafficManualOverride(string $groupKey): void
+    {
+        $groupKey = trim($groupKey);
+        if ($groupKey === '') {
+            return;
+        }
+        $this->db->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+            ->execute(['traffic_manual_override_' . $groupKey, (string) time()]);
+    }
+
+    public function hasTrafficManualOverride(string $groupKey): bool
+    {
+        $groupKey = trim($groupKey);
+        if ($groupKey === '') {
+            return false;
+        }
+        $stmt = $this->db->prepare("SELECT value FROM settings WHERE key = ?");
+        $stmt->execute(['traffic_manual_override_' . $groupKey]);
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    public function clearTrafficManualOverride(string $groupKey): void
+    {
+        $groupKey = trim($groupKey);
+        if ($groupKey === '') {
+            return;
+        }
+        $this->db->prepare("DELETE FROM settings WHERE key = ?")
+            ->execute(['traffic_manual_override_' . $groupKey]);
+    }
+
     public function restoreScheduleAfterTrafficBlock($groupKey)
     {
         $groupKey = trim((string) $groupKey);

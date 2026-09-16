@@ -108,6 +108,27 @@ final class FakeMonitorConfig
     public function updateLastKeepAlive($id, $time): void
     {
     }
+
+    // ---- 手动放行标记(流量熔断后手动开机) ----
+    public bool $manualOverride = false;
+    public array $overrideEvents = [];
+
+    public function hasTrafficManualOverride(string $groupKey): bool
+    {
+        return $this->manualOverride;
+    }
+
+    public function setTrafficManualOverride(string $groupKey): void
+    {
+        $this->manualOverride = true;
+        $this->overrideEvents[] = 'set:' . $groupKey;
+    }
+
+    public function clearTrafficManualOverride(string $groupKey): void
+    {
+        $this->manualOverride = false;
+        $this->overrideEvents[] = 'clear:' . $groupKey;
+    }
 }
 
 final class FakeMonitorAliyun
@@ -549,5 +570,50 @@ function test_traffic_recovery_auto_restores_schedule_block(): void
 }
 
 test_traffic_recovery_auto_restores_schedule_block();
+
+// ---- 手动放行:熔断停机后手动开机不再被自动关 ----
+
+function test_manual_override_skips_auto_stop(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $config->manualOverride = true;
+    $aliyun = new FakeMonitorAliyun();
+    $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    // 同组流量 200 而限额 100 → 远超阈值
+    $db->getPdo()->prepare("INSERT INTO accounts (id, group_key, access_key_id, region_id, traffic_billing_month, traffic_used) VALUES (?,?,?,?,?,?)")
+        ->execute([1, 'gk1', 'AKIDOVER0001', 'cn-hongkong', date('Y-m'), 200.0]);
+
+    $account = scheduled_account(['group_key' => 'gk1', 'max_traffic' => 100.0, 'traffic_used' => 200.0, 'updated_at' => time()]);
+    $state = scheduled_state(['scheduleBlockedByTraffic' => true]);
+
+    $result = invoke_monitor_traffic_breaker($service, $account, time(), $state);
+
+    assert_same_monitor(false, $result, 'manual override should skip the auto-stop');
+    assert_same_monitor(0, $aliyun->controlCalls, 'no stop call while manually overridden');
+    assert_same_monitor(true, strpos($state['apiStatusLog'], '已手动放行') !== false, 'status log should mention the manual override');
+}
+
+test_manual_override_skips_auto_stop();
+
+function test_traffic_recovery_clears_manual_override(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $config->manualOverride = true;
+    $service = new MonitorService($db, $config, new FakeMonitorAliyun(), new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    // 用量远低于阈值 → 视为已回落
+    $account = scheduled_account(['max_traffic' => 1000.0, 'traffic_used' => 10.0, 'updated_at' => time()]);
+    $state = scheduled_state();
+
+    invoke_monitor_traffic_breaker($service, $account, time(), $state);
+
+    assert_same_monitor(true, in_array('clear:gk1', $config->overrideEvents, true), 'traffic recovery should clear the manual override');
+    assert_same_monitor(false, $config->manualOverride, 'override flag should be off after recovery');
+}
+
+test_traffic_recovery_clears_manual_override();
 
 echo "MonitorService tests passed\n";
