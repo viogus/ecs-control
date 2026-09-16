@@ -568,6 +568,16 @@ class MonitorService
             ->execute([$this->costQueryFailureCooldownKey($account)]);
     }
 
+    /**
+     * 该账号组是否处于「手动放行」状态（流量熔断停机后用户手动开机）。
+     * 放行期间熔断类自动干预（超阈值自动停机）不再生效，定时开关机/保活/月度自启
+     * 恢复按计划执行 —— 即「手动开机只免除熔断，不改变定时计划」。
+     */
+    private function isTrafficManuallyOverridden(array $s): bool
+    {
+        return $this->configManager->hasTrafficManualOverride((string) ($s['accountGroupKey'] ?? ''));
+    }
+
     // ---- Phase 3: 定时开关机 ----
 
     private function handleScheduledOps($account, int $currentTime, string $shutdownMode, array &$s): void
@@ -579,7 +589,10 @@ class MonitorService
         $stopTime = trim((string) ($account->stopTime ?? ''));
         $today = date('Y-m-d', $currentTime);
 
-        $scheduleAllowed = $scheduleEnabled && !$s['scheduleBlockedByTraffic'] && !($s['requiresTrafficProtection'] ?? false);
+        // 手动放行期间：超阈值不再挡住定时计划 —— 放行只免除流量熔断，不改变定时开关机
+        $scheduleAllowed = $scheduleEnabled
+            && !$s['scheduleBlockedByTraffic']
+            && (!($s['requiresTrafficProtection'] ?? false) || $this->isTrafficManuallyOverridden($s));
         $isStableState = !in_array($s['status'], [InstanceStatus::Starting->value, InstanceStatus::Stopping->value, InstanceStatus::Pending->value, InstanceStatus::Releasing->value, InstanceStatus::Released->value], true);
 
         // 定时停机
@@ -652,7 +665,7 @@ class MonitorService
     private function handleMonthlyAutoStart($account, int $currentTime, bool $monthlyAutoStart, array &$s): void
     {
         $autoStartBlocked = !empty($account->autoStartBlocked);
-        if (!$monthlyAutoStart || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic'] || date('j', $currentTime) !== '1') {
+        if (!$monthlyAutoStart || $autoStartBlocked || (($s['requiresTrafficProtection'] ?? false) && !$this->isTrafficManuallyOverridden($s)) || $s['scheduleBlockedByTraffic'] || date('j', $currentTime) !== '1') {
             return;
         }
 
@@ -709,7 +722,7 @@ class MonitorService
     private function handleKeepAlive($account, int $currentTime, bool $keepAlive, array &$s): void
     {
         $autoStartBlocked = !empty($account->autoStartBlocked);
-        if (!$keepAlive || $autoStartBlocked || ($s['requiresTrafficProtection'] ?? false) || $s['scheduleBlockedByTraffic']) {
+        if (!$keepAlive || $autoStartBlocked || (($s['requiresTrafficProtection'] ?? false) && !$this->isTrafficManuallyOverridden($s)) || $s['scheduleBlockedByTraffic']) {
             return;
         }
 

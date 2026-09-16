@@ -616,4 +616,46 @@ function test_traffic_recovery_clears_manual_override(): void
 
 test_traffic_recovery_clears_manual_override();
 
+// ---- 手动放行只免除熔断，不改变定时计划 ----
+
+function test_scheduled_stop_still_runs_while_manually_overridden(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $config->manualOverride = true;
+    $aliyun = new FakeMonitorAliyun();
+    $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    // 放行期间流量仍超阈值：定时计划不受影响，到点照样停机
+    $account = scheduled_account(['instance_status' => 'Running']);
+    $state = scheduled_state(['status' => 'Running', 'requiresTrafficProtection' => true]);
+
+    invoke_monitor_scheduled_ops($service, $account, strtotime('2026-09-16 23:00:10'), 'KeepCharging', $state);
+
+    assert_same_monitor(1, $aliyun->controlCalls, 'scheduled stop must still run while manually overridden');
+    assert_same_monitor(true, in_array('定时停机', $state['actions'], true), 'action should record the scheduled stop');
+    assert_same_monitor(1, count($config->executionStates), 'the day window should be consumed by a real stop');
+}
+
+test_scheduled_stop_still_runs_while_manually_overridden();
+
+function test_scheduled_stop_skipped_when_over_threshold_without_override(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $aliyun = new FakeMonitorAliyun();
+    $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    // 未放行且流量超阈值：熔断优先，定时计划让位（此前的行为保持不变）
+    $account = scheduled_account(['instance_status' => 'Running']);
+    $state = scheduled_state(['status' => 'Running', 'requiresTrafficProtection' => true]);
+
+    invoke_monitor_scheduled_ops($service, $account, strtotime('2026-09-16 23:00:10'), 'KeepCharging', $state);
+
+    assert_same_monitor(0, $aliyun->controlCalls, 'without override the breaker must win over the schedule');
+    assert_same_monitor(0, count($config->executionStates), 'no day window consumption when the schedule is blocked');
+}
+
+test_scheduled_stop_skipped_when_over_threshold_without_override();
+
 echo "MonitorService tests passed\n";
