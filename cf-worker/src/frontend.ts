@@ -195,7 +195,7 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
           <label>CDN 代理</label>
           <label class="toggle"><input type="checkbox" v-model="ddns.proxied" true-value="1" false-value="0"><span class="slider"></span></label>
         </div>
-        <p style="font-size:12px;color:#86868b;margin-bottom:8px">记录名格式: 实例备注.根域名。DDNS 每 10 分钟由 Cron 自动同步一次。</p>
+        <p style="font-size:12px;color:#86868b;margin-bottom:8px">记录名格式: 账号组备注.根域名（同组多实例时追加实例名或实例 ID 后缀，与 PHP 版本算法一致）。DDNS 每 10 分钟由 Cron 自动同步一次。</p>
         <button class="btn btn-primary" @click="saveDdns" :disabled="working">{{ working ? '保存中...' : '保存 DDNS 配置' }}</button>
       </div>
     </div>
