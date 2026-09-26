@@ -1,0 +1,566 @@
+{
+    "_comment": "PHP 与 cf-worker 共用的 DDNS 算法验收向量。期望值由 PHP 实现生成(tests/generate-ddns-vectors.php)，两端测试都必须通过；修改算法后需重新生成。",
+    "nameVectors": [
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "uk",
+                "remark": "uk",
+                "instance_name": "iZbp1xxxx",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "uk.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "uk",
+                "remark": "uk",
+                "instance_name": "iZbp1xxxx",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 2
+            },
+            "expected": "uk-izbp1xxxx.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "uk",
+                "remark": "uk",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 2
+            },
+            "expected": "uk-abc123.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "uk",
+                "remark": "uk",
+                "instance_name": "uk",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 2
+            },
+            "expected": "uk.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "",
+                "remark": "",
+                "instance_name": "web 1",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "web-1.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "",
+                "remark": "",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "abc123.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "",
+                "remark": "",
+                "instance_name": "",
+                "instance_id": "abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "abc123.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "香港节点",
+                "remark": "香港节点",
+                "instance_name": "iZbp1xxxx",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "c5295bea.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "节点 node 1",
+                "remark": "节点 node 1",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "node-1.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "UK Node",
+                "remark": "UK Node",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "uk-node.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "café",
+                "remark": "café",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "cafe.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "Ünïcödé",
+                "remark": "Ünïcödé",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "unicode.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "ß",
+                "remark": "ß",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "ss.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "  a  b  ",
+                "remark": "  a  b  ",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "a-b.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "--x--",
+                "remark": "--x--",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "x.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "!!!",
+                "remark": "!!!",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "9a7b006d.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "remark": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "HTTPS://CDF.MBA/",
+                "account_remark": "uk",
+                "remark": "uk",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "uk.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba.",
+                "account_remark": "uk",
+                "remark": "uk",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "uk.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": " ",
+                "remark": " ",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "ab90d23f.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "uk ",
+                "remark": "uk ",
+                "instance_name": "",
+                "instance_id": "i-abc123",
+                "same_group_instance_count": 1
+            },
+            "expected": "uk.cdf.mba"
+        },
+        {
+            "input": {
+                "domain": "cdf.mba",
+                "account_remark": "",
+                "remark": "",
+                "instance_name": "",
+                "instance_id": "",
+                "same_group_instance_count": 1
+            },
+            "error": "DDNS 记录名生成失败，请检查账号备注或实例名称"
+        }
+    ],
+    "domainVectors": [
+        {
+            "input": "cdf.mba",
+            "expected": "cdf.mba"
+        },
+        {
+            "input": "HTTPS://CDF.MBA/",
+            "expected": "cdf.mba"
+        },
+        {
+            "input": "http://cdf.mba/path",
+            "expected": "cdf.mba"
+        },
+        {
+            "input": " cdf.mba. ",
+            "expected": "cdf.mba"
+        },
+        {
+            "input": "",
+            "expected": ""
+        },
+        {
+            "input": ".",
+            "expected": ""
+        },
+        {
+            "input": "CDF.MBA:8080",
+            "expected": "cdf.mba:8080"
+        }
+    ],
+    "remarkVectors": [
+        {
+            "account": {
+                "remark": "uk",
+                "group_key": "g1"
+            },
+            "groups": [
+                {
+                    "groupKey": "g1",
+                    "remark": "UK Main"
+                }
+            ],
+            "expected": "UK Main"
+        },
+        {
+            "account": {
+                "remark": "uk",
+                "group_key": "g9"
+            },
+            "groups": [
+                {
+                    "groupKey": "g1",
+                    "remark": "UK Main"
+                }
+            ],
+            "expected": "uk"
+        },
+        {
+            "account": {
+                "remark": "uk",
+                "group_key": ""
+            },
+            "groups": [
+                {
+                    "groupKey": "g1",
+                    "remark": "UK Main"
+                }
+            ],
+            "expected": "uk"
+        },
+        {
+            "account": {
+                "remark": "fallback",
+                "group_key": "g1"
+            },
+            "groups": [
+                {
+                    "groupKey": "g1",
+                    "remark": "  "
+                }
+            ],
+            "expected": ""
+        },
+        {
+            "account": {
+                "remark": "",
+                "group_key": "g1"
+            },
+            "groups": [],
+            "expected": ""
+        },
+        {
+            "account": {
+                "remark": " uk ",
+                "group_key": " g1 "
+            },
+            "groups": [
+                {
+                    "groupKey": "g1",
+                    "remark": " UK Main "
+                }
+            ],
+            "expected": "UK Main"
+        }
+    ],
+    "groupCountVectors": [
+        {
+            "accounts": [
+                {
+                    "group_key": "g1",
+                    "instance_id": "i-1"
+                },
+                {
+                    "group_key": "g1",
+                    "instance_id": "i-2"
+                },
+                {
+                    "group_key": "g2",
+                    "instance_id": ""
+                },
+                {
+                    "group_key": "",
+                    "access_key_id": "LTAI",
+                    "region_id": "cn-hongkong",
+                    "instance_id": "i-3"
+                }
+            ],
+            "expected": {
+                "g1": 2,
+                "LTAI|cn-hongkong": 1
+            }
+        }
+    ],
+    "ipSelectionVectors": [
+        {
+            "public_ip_mode": "eip",
+            "eip_address": "8.208.77.147",
+            "public_ip": "10.0.0.5",
+            "expected": "8.208.77.147"
+        },
+        {
+            "public_ip_mode": "eip",
+            "eip_address": "10.0.0.5",
+            "public_ip": "9.9.9.9",
+            "expected": "9.9.9.9"
+        },
+        {
+            "public_ip_mode": "eip",
+            "eip_address": "",
+            "public_ip": "9.9.9.9",
+            "expected": "9.9.9.9"
+        },
+        {
+            "public_ip_mode": "eip",
+            "eip_address": " 8.208.77.147 ",
+            "public_ip": "",
+            "expected": "8.208.77.147"
+        },
+        {
+            "public_ip_mode": "ecs_public_ip",
+            "eip_address": "8.208.77.147",
+            "public_ip": "9.9.9.9",
+            "expected": "9.9.9.9"
+        },
+        {
+            "public_ip_mode": "eip",
+            "eip_address": "192.0.2.1",
+            "public_ip": "",
+            "expected": "192.0.2.1"
+        },
+        {
+            "public_ip_mode": "eip",
+            "eip_address": "not-an-ip",
+            "public_ip": "9.9.9.9",
+            "expected": "9.9.9.9"
+        },
+        {
+            "public_ip_mode": "",
+            "eip_address": "",
+            "public_ip": " 9.9.9.9 ",
+            "expected": "9.9.9.9"
+        },
+        {
+            "public_ip_mode": "eip",
+            "eip_address": "2001:db8::1",
+            "public_ip": "9.9.9.9",
+            "expected": "9.9.9.9"
+        }
+    ],
+    "ipVectors": [
+        {
+            "ip": "8.208.77.147",
+            "public": true
+        },
+        {
+            "ip": "10.0.0.1",
+            "public": false
+        },
+        {
+            "ip": "172.16.5.5",
+            "public": false
+        },
+        {
+            "ip": "172.32.5.5",
+            "public": true
+        },
+        {
+            "ip": "192.168.1.1",
+            "public": false
+        },
+        {
+            "ip": "169.254.1.1",
+            "public": false
+        },
+        {
+            "ip": "127.0.0.1",
+            "public": false
+        },
+        {
+            "ip": "0.0.0.0",
+            "public": false
+        },
+        {
+            "ip": "100.64.0.1",
+            "public": true
+        },
+        {
+            "ip": "192.0.2.1",
+            "public": true
+        },
+        {
+            "ip": "198.51.100.7",
+            "public": true
+        },
+        {
+            "ip": "203.0.113.9",
+            "public": true
+        },
+        {
+            "ip": "240.0.0.1",
+            "public": false
+        },
+        {
+            "ip": "255.255.255.255",
+            "public": false
+        },
+        {
+            "ip": "224.0.0.1",
+            "public": true
+        },
+        {
+            "ip": "198.18.0.1",
+            "public": true
+        },
+        {
+            "ip": "192.88.99.1",
+            "public": true
+        },
+        {
+            "ip": "1.2.3",
+            "public": false
+        },
+        {
+            "ip": "8.208.77.147 ",
+            "public": false
+        },
+        {
+            "ip": "999.1.1.1",
+            "public": false
+        },
+        {
+            "ip": "::1",
+            "public": false
+        },
+        {
+            "ip": "8.208.77.147/24",
+            "public": false
+        },
+        {
+            "ip": "",
+            "public": false
+        },
+        {
+            "ip": "01.2.3.4",
+            "public": false
+        },
+        {
+            "ip": "1.2.3.04",
+            "public": false
+        },
+        {
+            "ip": "1.2.3.4\n",
+            "public": false
+        },
+        {
+            "ip": "1.2.3.4.",
+            "public": false
+        },
+        {
+            "ip": "1.2.3.4.5",
+            "public": false
+        },
+        {
+            "ip": "+1.2.3.4",
+            "public": false
+        },
+        {
+            "ip": "172.15.0.1",
+            "public": true
+        },
+        {
+            "ip": "172.32.0.1",
+            "public": true
+        },
+        {
+            "ip": "11.0.0.1",
+            "public": true
+        }
+    ]
+}

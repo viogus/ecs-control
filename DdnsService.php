@@ -247,21 +247,41 @@ class DdnsService
         return implode('；', $messages);
     }
 
+    /**
+     * 非 ASCII 字母 -> ASCII 的折叠表("源字符:目标",逗号分隔)。
+     *
+     * 刻意不再使用 iconv('ASCII//TRANSLIT'):musl(Alpine 生产镜像)与 glibc(CI 官方镜像)
+     * 的转写结果并不相同(é -> "'" vs "e"),同一备注在两处会生成不同记录名。
+     *
+     * 该表必须与 cf-worker/src/ddns.ts 的 ASCII_FOLD 逐字符一致;
+     * tests/ddns-name-vectors.json 是两端共用的验收向量,两边测试都会跑。
+     */
+    private const ASCII_FOLD = 'ª:a,º:o,À:a,Á:a,Â:a,Ã:a,Ä:a,Å:a,Æ:ae,Ç:c,È:e,É:e,Ê:e,Ë:e,Ì:i,Í:i,Î:i,Ï:i,Ð:d,Ñ:n,Ò:o,Ó:o,Ô:o,Õ:o,Ö:o,Ø:o,Ù:u,Ú:u,Û:u,Ü:u,Ý:y,Þ:th,ß:ss,à:a,á:a,â:a,ã:a,ä:a,å:a,æ:ae,ç:c,è:e,é:e,ê:e,ë:e,ì:i,í:i,î:i,ï:i,ð:d,ñ:n,ò:o,ó:o,ô:o,õ:o,ö:o,ø:o,ù:u,ú:u,û:u,ü:u,ý:y,þ:th,ÿ:y,Ā:a,ā:a,Ă:a,ă:a,Ą:a,ą:a,Ć:c,ć:c,Ĉ:c,ĉ:c,Ċ:c,ċ:c,Č:c,č:c,Ď:d,ď:d,Đ:d,đ:d,Ē:e,ē:e,Ĕ:e,ĕ:e,Ė:e,ė:e,Ę:e,ę:e,Ě:e,ě:e,Ĝ:g,ĝ:g,Ğ:g,ğ:g,Ġ:g,ġ:g,Ģ:g,ģ:g,Ĥ:h,ĥ:h,Ħ:h,ħ:h,Ĩ:i,ĩ:i,Ī:i,ī:i,Ĭ:i,ĭ:i,Į:i,į:i,İ:i,ı:i,Ĳ:ij,ĳ:ij,Ĵ:j,ĵ:j,Ķ:k,ķ:k,ĸ:k,Ĺ:l,ĺ:l,Ļ:l,ļ:l,Ľ:l,ľ:l,Ŀ:l,ŀ:l,Ł:l,ł:l,Ń:n,ń:n,Ņ:n,ņ:n,Ň:n,ň:n,ŉ:n,Ŋ:n,ŋ:n,Ō:o,ō:o,Ŏ:o,ŏ:o,Ő:o,ő:o,Œ:oe,œ:oe,Ŕ:r,ŕ:r,Ŗ:r,ŗ:r,Ř:r,ř:r,Ś:s,ś:s,Ŝ:s,ŝ:s,Ş:s,ş:s,Š:s,š:s,ſ:s,Ţ:t,ţ:t,Ť:t,ť:t,Ŧ:t,ŧ:t,Ũ:u,ũ:u,Ū:u,ū:u,Ŭ:u,ŭ:u,Ů:u,ů:u,Ű:u,ű:u,Ų:u,ų:u,Ŵ:w,ŵ:w,Ŷ:y,ŷ:y,Ÿ:y,Ź:z,ź:z,Ż:z,ż:z,Ž:z,ž:z';
+
+    private static function foldMap(): array
+    {
+        static $map = null;
+        if ($map === null) {
+            $map = [];
+            foreach (explode(',', self::ASCII_FOLD) as $pair) {
+                $parts = explode(':', $pair, 2);
+                if (count($parts) === 2 && $parts[0] !== '') {
+                    $map[$parts[0]] = $parts[1];
+                }
+            }
+        }
+        return $map;
+    }
+
     private function slug($value)
     {
         $original = trim((string) $value);
-        $value = strtolower($original);
-        if ($value === '') {
+        if ($original === '') {
             return '';
         }
 
-        if (function_exists('iconv')) {
-            $converted = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value);
-            if ($converted !== false) {
-                $value = $converted;
-            }
-        }
-
+        // 折叠后再 strtolower:大写变音符(À/Ü)也走折叠表,不依赖 iconv/locale。
+        $value = strtolower(strtr($original, self::foldMap()));
         $value = preg_replace('/[^a-z0-9]+/', '-', $value);
         $value = trim($value, '-');
         if ($value === '') {
