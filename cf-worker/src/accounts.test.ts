@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('./aliyun-api', () => ({ getInstances: vi.fn() }));
 
 import { getInstances } from './aliyun-api';
-import { refreshAccountMetadata, refreshAllAccountsMetadata } from './accounts';
+import { refreshAccountMetadata, isMetadataRefreshDue } from './accounts';
 import type { Account } from './types';
 
 /** 只记录写语句的极简 D1 桩 */
@@ -120,23 +120,23 @@ describe('refreshAccountMetadata', () => {
   });
 });
 
-describe('refreshAllAccountsMetadata', () => {
-  it('逐个刷新,跳过没有 instance_id 的行,单个失败不影响其余', async () => {
-    vi.mocked(getInstances)
-      .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce([remoteInstance({ instanceId: 'i-2', publicIp: '9.9.9.9' })]);
-    const db = new FakeDb();
-    const logs: string[] = [];
+describe('isMetadataRefreshDue(与 PHP 节流语义一致)', () => {
+  const now = 1774000000;
 
-    await refreshAllAccountsMetadata(db as unknown as D1Database, 'enc', [
-      account({ id: 1 }),
-      account({ id: 2, instance_id: 'i-2' }),
-      account({ id: 3, instance_id: '' }),
-    ], (_t, m) => { logs.push(m); });
+  it('首次(无标记)立即到期', () => {
+    expect(isMetadataRefreshDue(0, 1800, now)).toBe(true);
+  });
 
-    expect(vi.mocked(getInstances)).toHaveBeenCalledTimes(2);
-    expect(db.updates().filter(u => /UPDATE accounts/i.test(u.sql))).toHaveLength(1);
-    expect(logs.some(l => l.includes('实例元数据刷新失败 [uk]'))).toBe(true);
-    expect(logs.some(l => l.includes('public_ip 8.208.8.54 -> 9.9.9.9'))).toBe(true);
+  it('未满一个周期不到期', () => {
+    expect(isMetadataRefreshDue(now - 1799, 1800, now)).toBe(false);
+  });
+
+  it('满一个周期到期', () => {
+    expect(isMetadataRefreshDue(now - 1800, 1800, now)).toBe(true);
+  });
+
+  it('interval <= 0 关闭刷新', () => {
+    expect(isMetadataRefreshDue(0, 0, now)).toBe(false);
+    expect(isMetadataRefreshDue(0, -1, now)).toBe(false);
   });
 });

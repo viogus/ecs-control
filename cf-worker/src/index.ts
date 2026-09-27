@@ -13,7 +13,7 @@ import { decrypt, encrypt, isEncrypted } from './crypto';
 import { buildPreview } from './ecs-create';
 import { importFromDocker } from './migration';
 import { renderHtml } from './frontend';
-import { syncAccountGroups, getGroupsFromSettings, mergeMaskedAccountGroupSecrets, encryptGroupSecrets, refreshAllAccountsMetadata } from './accounts';
+import { syncAccountGroups, getGroupsFromSettings, mergeMaskedAccountGroupSecrets, encryptGroupSecrets, refreshAccountMetadata, isMetadataRefreshDue } from './accounts';
 import { sendEmail, sendWebhook, notifyPublicIpChanged } from './notification';
 import { VUE_SOURCE } from './vue-source';
 import type { MigrationExport } from './types';
@@ -563,6 +563,10 @@ export default {
     if (cron === '* * * * *') {
       // Pre-load all settings once (saves 8+ individual getSetting queries per account)
       const settings = await getSettings(env.DB).catch(() => ({} as Record<string, string>));
+      // 网络元数据自愈:IP 若是在别处(另一个部署/控制台)改的,这里按 instance_meta_refresh_interval
+      // 节流刷新(默认 1800s,0 关闭),避免本库永久停在旧值、DDNS 每轮与对方互改。
+      // 复用本分支已预读的 settings,不额外产生 D1 读;不新增 cron 触发(免费版账号级上限 5 个)。
+      const metaInterval = parseInt(settings['instance_meta_refresh_interval'] ?? '1800', 10);
       for (const acc of accounts) {
         let decrypted: any;
         try { decrypted = await decryptAccount(acc); }
@@ -574,6 +578,16 @@ export default {
           try {
             const trafficLogs = await runTrafficCheck(env, decrypted, settings);
             const scheduleLogs = await runScheduleCheck(env, decrypted, settings);
+
+            const metaKey = `meta_refresh_at_${acc.id}`;
+            const now = Math.floor(Date.now() / 1000);
+            if (isMetadataRefreshDue(parseInt(settings[metaKey] ?? '0', 10), metaInterval, now)) {
+              // 先落时间戳:失败也退避一个周期,避免每分钟重试触发阿里云限流
+              await saveSetting(env.DB, metaKey, String(now));
+              await refreshAccountMetadata(env.DB, env.ENCRYPTION_KEY, decrypted,
+                (type, msg) => addLog(env.DB, type, msg));
+            }
+
             await addLog(env.DB, 'heartbeat',
               `[${acc.remark || acc.instance_id}] ${acc.instance_status} | ` +
               `Traffic: ${trafficLogs.length ? trafficLogs.join(',') : 'OK'} | ` +
@@ -590,25 +604,6 @@ export default {
       ctx.waitUntil((async () => {
         try { await syncDdns(env.DB, accounts, env.ENCRYPTION_KEY); }
         catch (e: any) { try { await addLog(env.DB, 'error', `DDNS cron failed: ${e.message}`); } catch {} }
-      })());
-    }
-
-    // 每 30 分钟对齐一次实例网络元数据:IP 若是在别处(另一个部署/控制台)改的,本库不会永久停在旧值,
-    // 否则 DDNS 会拿着陈旧 IP 与对方来回互改。设 instance_meta_refresh_interval=0 可关闭。
-    if (cron === '*/30 * * * *') {
-      ctx.waitUntil((async () => {
-        try {
-          if ((await getSetting(env.DB, 'instance_meta_refresh_interval', '1800')) === '0') return;
-          const decrypted: Account[] = [];
-          for (const acc of accounts) {
-            try { decrypted.push(await decryptAccount(acc) as Account); }
-            catch (e: any) { try { await addLog(env.DB, 'error', `Decrypt failed [${acc.remark || acc.instance_id}]: ${e.message}`); } catch {} }
-          }
-          await refreshAllAccountsMetadata(env.DB, env.ENCRYPTION_KEY, decrypted,
-            (type, msg) => addLog(env.DB, type, msg));
-        } catch (e: any) {
-          try { await addLog(env.DB, 'error', `Metadata refresh cron failed: ${e.message}`); } catch {}
-        }
       })());
     }
 

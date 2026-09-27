@@ -268,16 +268,14 @@ export async function refreshAccountMetadata(
   }
 }
 
-/** 按顺序刷新全部账号(串行,避免对阿里云接口并发过猛) */
-export async function refreshAllAccountsMetadata(
-  db: D1Database, encKey: string, accounts: Account[], onLog?: (type: string, msg: string) => void
-): Promise<void> {
-  for (const account of accounts) {
-    if (!account.instance_id) continue;
-    try {
-      await refreshAccountMetadata(db, encKey, account, onLog);
-    } catch (e: any) {
-      onLog?.('warning', `实例元数据刷新异常 [${account.remark || account.instance_id}]: ${e?.message ?? e}`);
-    }
-  }
+/**
+ * 网络元数据刷新是否到期。
+ *
+ * 放在已有 cron 分支里节流,而不是新增 cron 触发 —— Workers 免费版有账号级 cron 数量上限
+ * (5 个/账号),本 Worker 已经用了 3 个。语义与 PHP `MonitorService::refreshAccountNetworkMetadata`
+ * 完全一致:interval <= 0 关闭;首次(lastRefreshAt <= 0)立即执行;否则满一个周期才再刷。
+ */
+export function isMetadataRefreshDue(lastRefreshAt: number, intervalSeconds: number, now: number): boolean {
+  if (!(intervalSeconds > 0)) return false;
+  return !(lastRefreshAt > 0 && (now - lastRefreshAt) < intervalSeconds);
 }
