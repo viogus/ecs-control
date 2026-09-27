@@ -250,7 +250,7 @@ describe('syncDdns 与 PHP 同步行为一致', () => {
     expect(calls.map(c => c.method)).toEqual(['GET', 'PUT']);
     expect(calls[1].url).toContain('/dns_records/rec-1');
     expect(calls[1].body).toMatchObject({ type: 'A', name: 'uk-main.cdf.mba', content: '8.208.77.147', ttl: 1, proxied: false });
-    expect(db.logs()).toEqual(['DDNS updated: uk-main.cdf.mba -> 8.208.77.147']);
+    expect(db.logs()).toEqual(['DDNS updated: uk-main.cdf.mba -> 8.208.77.147 (from 1.1.1.1)']);
   });
 
   it('记录不存在时创建,API 失败时记 warning(不再静默)', async () => {
@@ -288,7 +288,7 @@ describe('syncDdns 与 PHP 同步行为一致', () => {
       .filter(c => c.method === 'GET')
       .map(c => decodeURIComponent(new URL(c.url).searchParams.get('name') ?? ''));
     expect(listNames).toEqual(['uk-main-web-1.cdf.mba', 'uk-main-web-2.cdf.mba']);
-    expect(db.logs()).toEqual(['DDNS updated: uk-main-web-2.cdf.mba -> 9.9.9.9']);
+    expect(db.logs()).toEqual(['DDNS updated: uk-main-web-2.cdf.mba -> 9.9.9.9 (from 8.208.77.147)']);
   });
 
   it('未启用或没有公网 IP 时不触碰 Cloudflare', async () => {

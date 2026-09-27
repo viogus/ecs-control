@@ -138,4 +138,14 @@ if (!preg_match("/export const ASCII_FOLD\s*=\s*'([^']*)'/", $tsSource, $matches
 }
 ddns_assert($phpFold, $matches[1], 'ASCII_FOLD 两端逐字符一致');
 
+// ---- 9. 同步结果日志后缀(判定"谁是另一个写入者"的判据)----
+ddns_assert(', created', DdnsService::describeSyncResult(['action' => 'created']), 'created 后缀');
+ddns_assert(
+    ', updated from 8.208.8.54',
+    DdnsService::describeSyncResult(['action' => 'updated', 'previous' => '8.208.8.54']),
+    'updated 后缀带旧值'
+);
+ddns_assert('', DdnsService::describeSyncResult(['action' => 'updated']), '无旧值时后缀为空');
+ddns_assert('', DdnsService::describeSyncResult([]), '无动作时后缀为空');
+
 echo "DdnsService tests passed\n";

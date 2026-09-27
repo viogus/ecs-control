@@ -252,7 +252,9 @@ export async function syncDdns(db: D1Database, accounts: Account[], encKey: stri
       const json = await res.json().catch(() => ({})) as any;
       if (!json.success) throw new Error(`Cloudflare ${existing ? '更新' : '创建'}记录失败: ${cfErrors(json)}`);
 
-      await addLog(db, 'info', `DDNS ${existing ? 'updated' : 'created'}: ${recordName} -> ${ip}`);
+      // 带上写入前的旧值:出现"每轮都在同步"时,它直接指出对方把记录改成了什么
+      await addLog(db, 'info', `DDNS ${existing ? 'updated' : 'created'}: ${recordName} -> ${ip}` +
+        (existing ? ` (from ${existing.content})` : ''));
     } catch (e: any) {
       await addLog(db, 'warning', `DDNS sync failed [${label}]: ${e?.message ?? e}`);
     }

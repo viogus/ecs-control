@@ -108,8 +108,25 @@ class DdnsService
             'success' => true,
             'record' => $recordName,
             'ip' => $ip,
-            'action' => $existing ? 'updated' : 'created'
+            'action' => $existing ? 'updated' : 'created',
+            // 写入前的旧内容:出现"每轮都在同步"时,它直接指出对方把记录改成了什么
+            'previous' => $existing ? (string) ($existing['content'] ?? '') : ''
         ];
+    }
+
+    /**
+     * 同步结果的日志后缀:`, created` 或 `, updated from <旧值>`。
+     *
+     * 单独成函数是为了可测 —— 排查"两个 DDNS 管理者互改"时,这串后缀就是判据:
+     * created 说明查询没命中(重复建记录),updated from X 说明别人把记录改成了 X。
+     */
+    public static function describeSyncResult(array $result): string
+    {
+        if (($result['action'] ?? '') === 'created') {
+            return ', created';
+        }
+        $previous = trim((string) ($result['previous'] ?? ''));
+        return $previous !== '' ? ", updated from {$previous}" : '';
     }
 
     public function deleteARecord($recordName)
@@ -312,7 +329,8 @@ class DdnsService
                 $result = $this->syncARecord($recordName, $publicIp);
                 if (!empty($result['success']) && empty($result['skipped'])) {
                     $ddnsLabel = Helpers::getAccountLogLabel($account);
-                    $this->db->addLog('info', "DDNS 已同步 [{$ddnsLabel}] {$recordName} -> {$publicIp} ({$source})");
+                    $suffix = self::describeSyncResult($result);
+                    $this->db->addLog('info', "DDNS 已同步 [{$ddnsLabel}] {$recordName} -> {$publicIp} ({$source}{$suffix})");
                 } elseif (empty($result['success'])) {
                     $ddnsErrLabel = Helpers::getAccountLogLabel($account);
                     $this->db->addLog('warning', "DDNS 同步失败 [{$ddnsErrLabel}]: " . strip_tags($result['message'] ?? '未知错误'));
