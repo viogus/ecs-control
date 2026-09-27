@@ -251,6 +251,10 @@ class MonitorService
         // 5. 保活逻辑
         $this->handleKeepAlive($account, $currentTime, $keepAlive, $s);
 
+        // 6. 实例网络元数据自愈:IP 若是在别处(另一个部署/阿里云控制台)改的,本库最多一个周期内收敛,
+        //    否则 DDNS 会拿着陈旧 IP 每轮与对方互改。
+        $this->refreshAccountNetworkMetadata($account, $currentTime);
+
         // 汇总日志 (traffic data from phase 2 to avoid duplicate DB query)
         $actionLog = empty($s['actions']) ? "无动作" : implode(", ", $s['actions']);
         $usagePercent = $s['trafficUsagePercent'] ?? 0;
@@ -259,6 +263,96 @@ class MonitorService
 
         $this->db->addLog('heartbeat', $logLine);
         $logs[] = $logLine;
+    }
+
+    // ---- Phase 6: 实例网络元数据自愈 ----
+
+    /**
+     * 低频刷新实例网络元数据(公网 IP / EIP 分配 / 带宽)。
+     *
+     * 为什么需要:公网 IP 可能是在别处改的 —— 另一个部署(如 cf-worker)、或直接在阿里云控制台
+     * 重绑/更换 EIP。本库若不刷新就会永久停在旧值,而 DDNS 每轮都会拿这个旧 IP 去写 DNS,
+     * 与真正的持有者来回互改(表现为两边日志每 10 分钟各记一条"已同步")。
+     *
+     * 默认 30 分钟一次;设置 instance_meta_refresh_interval 为 0 可关闭。
+     * 失败也推进时间戳,退避一个周期,避免每分钟重试触发阿里云限流。
+     */
+    private function refreshAccountNetworkMetadata($account, int $currentTime): void
+    {
+        $instanceId = trim((string) ($account->instanceId ?? ''));
+        if ($instanceId === '' || $this->aliyunService === null) {
+            return;
+        }
+
+        $interval = (int) $this->configManager->get('instance_meta_refresh_interval', 1800);
+        if ($interval <= 0) {
+            return;
+        }
+
+        $markerKey = 'meta_refresh_at_' . (int) $account->id;
+        $stmt = $this->db->getPdo()->prepare("SELECT value FROM settings WHERE key = ? LIMIT 1");
+        $stmt->execute([$markerKey]);
+        $last = (int) $stmt->fetchColumn();
+        if ($last > 0 && ($currentTime - $last) < $interval) {
+            return;
+        }
+        $this->db->getPdo()
+            ->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+            ->execute([$markerKey, (string) $currentTime]);
+
+        $label = Helpers::getAccountLogLabel($account);
+        try {
+            $instances = $this->aliyunService->getInstances(
+                $account->accessKeyId,
+                $account->accessKeySecret,
+                $account->regionId
+            );
+        } catch (\Throwable $e) {
+            $this->db->addLog('warning', "实例元数据刷新失败 [{$label}]: " . strip_tags($e->getMessage()));
+            return;
+        }
+
+        $remote = null;
+        foreach ($instances as $instance) {
+            if (($instance['instanceId'] ?? '') === $instanceId) {
+                $remote = $instance;
+                break;
+            }
+        }
+        if ($remote === null) {
+            return;
+        }
+
+        $net = AccountSyncService::resolveNetworkMetadata($remote, [
+            'public_ip_mode' => $account->publicIpMode,
+            'eip_allocation_id' => $account->eipAllocationId,
+            'eip_address' => $account->eipAddress,
+            'eip_managed' => !empty($account->eipManaged) ? 1 : 0,
+        ]);
+
+        $changes = [];
+        if (($remote['publicIp'] ?? '') !== $account->publicIp) {
+            $changes[] = "public_ip {$account->publicIp} -> " . ($remote['publicIp'] ?? '');
+        }
+        if ($net['eip_address'] !== $account->eipAddress) {
+            $changes[] = "eip_address {$account->eipAddress} -> {$net['eip_address']}";
+        }
+        if ($net['public_ip_mode'] !== $account->publicIpMode) {
+            $changes[] = "public_ip_mode {$account->publicIpMode} -> {$net['public_ip_mode']}";
+        }
+
+        $this->configManager->updateAccountNetworkMetadata((int) $account->id, [
+            'public_ip' => $remote['publicIp'] ?? '',
+            'public_ip_mode' => $net['public_ip_mode'],
+            'eip_allocation_id' => $net['eip_allocation_id'],
+            'eip_address' => $net['eip_address'],
+            'eip_managed' => $net['eip_managed'],
+            'internet_max_bandwidth_out' => $remote['internetMaxBandwidthOut'] ?? 0,
+        ]);
+
+        if (!empty($changes)) {
+            $this->db->addLog('info', "实例网络元数据已刷新 [{$label}]: " . implode('; ', $changes));
+        }
     }
 
     // ---- Phase 1: 自适应心跳 ----

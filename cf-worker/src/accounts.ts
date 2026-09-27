@@ -222,3 +222,62 @@ export async function syncAccountGroups(
     }
   }
 }
+
+/**
+ * 只刷新单个账号的网络元数据(公网 IP / EIP / 带宽),不增删账号行。
+ *
+ * 与 PHP `MonitorService::refreshAccountNetworkMetadata` 语义一致:公网 IP 可能是在别处改的
+ * (另一个部署、阿里云控制台重绑 EIP)。本库若不刷新就会永久停在旧值,而 DDNS 每轮都会拿这个
+ * 旧 IP 去写 DNS,与真正的持有者来回互改(两边日志每 10 分钟各记一条"已同步")。
+ *
+ * 与 `syncAccountGroups` 的区别:不拉全量实例列表做增删,只更新已存在的这一行 —— 适合放进 cron。
+ */
+export async function refreshAccountMetadata(
+  db: D1Database, encKey: string, account: Account, onLog?: (type: string, msg: string) => void
+): Promise<boolean> {
+  const label = account.remark || account.instance_name || account.instance_id;
+  try {
+    const secret = isEncrypted(account.access_key_secret)
+      ? await decrypt(account.access_key_secret, encKey)
+      : account.access_key_secret;
+    const instances = await getInstances({ ...account, access_key_secret: secret });
+    const remote = instances.find(i => i.instanceId === account.instance_id);
+    if (!remote) {
+      return false;
+    }
+
+    const net = resolveNetworkMetadata(remote as unknown as Record<string, unknown>, account as unknown as Record<string, unknown>);
+    const publicIp = String(remote.publicIp ?? '');
+    const changes: string[] = [];
+    if (publicIp !== account.public_ip) changes.push(`public_ip ${account.public_ip} -> ${publicIp}`);
+    if (net.eip_address !== account.eip_address) changes.push(`eip_address ${account.eip_address} -> ${net.eip_address}`);
+    if (net.public_ip_mode !== account.public_ip_mode) changes.push(`public_ip_mode ${account.public_ip_mode} -> ${net.public_ip_mode}`);
+
+    await db.prepare(`UPDATE accounts SET public_ip=?, public_ip_mode=?, eip_allocation_id=?,
+      eip_address=?, eip_managed=?, internet_max_bandwidth_out=? WHERE id=?`)
+      .bind(publicIp, net.public_ip_mode, net.eip_allocation_id, net.eip_address, net.eip_managed,
+        Number(remote.internetMaxBandwidthOut ?? account.internet_max_bandwidth_out ?? 0), account.id).run();
+
+    if (changes.length > 0) {
+      onLog?.('info', `实例网络元数据已刷新 [${label}]: ${changes.join('; ')}`);
+    }
+    return true;
+  } catch (e: any) {
+    onLog?.('warning', `实例元数据刷新失败 [${label}]: ${e?.message ?? e}`);
+    return false;
+  }
+}
+
+/** 按顺序刷新全部账号(串行,避免对阿里云接口并发过猛) */
+export async function refreshAllAccountsMetadata(
+  db: D1Database, encKey: string, accounts: Account[], onLog?: (type: string, msg: string) => void
+): Promise<void> {
+  for (const account of accounts) {
+    if (!account.instance_id) continue;
+    try {
+      await refreshAccountMetadata(db, encKey, account, onLog);
+    } catch (e: any) {
+      onLog?.('warning', `实例元数据刷新异常 [${account.remark || account.instance_id}]: ${e?.message ?? e}`);
+    }
+  }
+}

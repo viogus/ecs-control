@@ -9,4 +9,4 @@ database_name = "ecs-control-db"
 database_id = ""
 
 [triggers]
-crons = ["* * * * *", "*/10 * * * *", "5 3 * * *"]
+crons = ["* * * * *", "*/10 * * * *", "*/30 * * * *", "5 3 * * *"]

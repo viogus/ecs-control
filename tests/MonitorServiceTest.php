@@ -109,6 +109,14 @@ final class FakeMonitorConfig
     {
     }
 
+    // ---- 实例网络元数据自愈 ----
+    public array $networkMetadataUpdates = [];
+
+    public function updateAccountNetworkMetadata($id, array $metadata): void
+    {
+        $this->networkMetadataUpdates[] = ['id' => $id, 'metadata' => $metadata];
+    }
+
     // ---- 手动放行标记(流量熔断后手动开机) ----
     public bool $manualOverride = false;
     public array $overrideEvents = [];
@@ -139,6 +147,20 @@ final class FakeMonitorAliyun
     {
         $this->controlCalls++;
         return true;
+    }
+
+    // ---- 实例网络元数据自愈 ----
+    public array $instances = [];
+    public array $getInstancesCalls = [];
+    public ?\Throwable $getInstancesError = null;
+
+    public function getInstances($key, $secret, $targetRegionId = null)
+    {
+        $this->getInstancesCalls[] = [$key, $targetRegionId];
+        if ($this->getInstancesError) {
+            throw $this->getInstancesError;
+        }
+        return $this->instances;
     }
 }
 
@@ -199,6 +221,16 @@ function assert_same_monitor($expected, $actual, string $message): void
     }
 }
 
+function assert_contains_monitor(string $needle, string $haystack, string $message): void
+{
+    if (!str_contains($haystack, $needle)) {
+        fwrite(STDERR, $message . PHP_EOL);
+        fwrite(STDERR, 'Missing: ' . $needle . PHP_EOL);
+        fwrite(STDERR, 'Actual: ' . $haystack . PHP_EOL);
+        exit(1);
+    }
+}
+
 function invoke_monitor_keep_alive(MonitorService $service, Account $account, int $currentTime, bool $keepAlive, array &$state): void
 {
     $method = new ReflectionMethod(MonitorService::class, 'handleKeepAlive');
@@ -225,6 +257,13 @@ function invoke_monitor_scheduled_ops(MonitorService $service, Account $account,
     $method = new ReflectionMethod(MonitorService::class, 'handleScheduledOps');
     $method->setAccessible(true);
     $method->invokeArgs($service, [$account, $currentTime, $shutdownMode, &$state]);
+}
+
+function invoke_monitor_meta_refresh(MonitorService $service, Account $account, int $currentTime): void
+{
+    $method = new ReflectionMethod(MonitorService::class, 'refreshAccountNetworkMetadata');
+    $method->setAccessible(true);
+    $method->invokeArgs($service, [$account, $currentTime]);
 }
 
 function test_keep_alive_skips_when_schedule_is_blocked_by_protection(): void
@@ -679,5 +718,106 @@ function test_scheduled_start_runs_when_within_limit(): void
 }
 
 test_scheduled_start_runs_when_within_limit();
+
+// ---- 实例网络元数据自愈:IP 在别处被改时,本库必须自己收敛 ----
+
+function meta_refresh_account(array $overrides = []): Account
+{
+    return Account::fromDbRow(array_merge([
+        'id' => 1,
+        'access_key_id' => 'AKID1234567890',
+        'access_key_secret' => 'secret',
+        'region_id' => 'cn-hongkong',
+        'instance_id' => 'i-1',
+        'remark' => 'uk',
+        'public_ip' => '8.208.8.54',
+        'public_ip_mode' => 'ecs_public_ip',
+        'eip_address' => '',
+        'site_type' => 'international',
+        'instance_status' => 'Running',
+    ], $overrides));
+}
+
+function test_meta_refresh_updates_stale_public_ip(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $aliyun = new FakeMonitorAliyun();
+    $aliyun->instances = [[
+        'instanceId' => 'i-1',
+        'publicIp' => '8.208.77.147',
+        'eipAllocationId' => '',
+        'eipAddress' => '',
+        'internetMaxBandwidthOut' => 100,
+    ]];
+    $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    $now = 1774000000;
+    invoke_monitor_meta_refresh($service, meta_refresh_account(), $now);
+
+    assert_same_monitor(1, count($aliyun->getInstancesCalls), 'should query instances once');
+    assert_same_monitor(1, count($config->networkMetadataUpdates), 'should persist refreshed metadata');
+    assert_same_monitor('8.208.77.147', $config->networkMetadataUpdates[0]['metadata']['public_ip'], 'public_ip should be refreshed');
+    assert_same_monitor(100, (int) $config->networkMetadataUpdates[0]['metadata']['internet_max_bandwidth_out'], 'bandwidth should be refreshed');
+    assert_same_monitor((string) $now, $db->setting('meta_refresh_at_1'), 'refresh marker should be stored');
+    assert_same_monitor(1, count($db->logsOfType('info')), 'a changed IP should be logged');
+    assert_contains_monitor('public_ip 8.208.8.54 -> 8.208.77.147', $db->logsOfType('info')[0], 'log should show old -> new');
+}
+
+test_meta_refresh_updates_stale_public_ip();
+
+function test_meta_refresh_is_throttled_by_interval(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $aliyun = new FakeMonitorAliyun();
+    $aliyun->instances = [['instanceId' => 'i-1', 'publicIp' => '8.208.77.147']];
+    $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    $now = 1774000000;
+    invoke_monitor_meta_refresh($service, meta_refresh_account(), $now);
+    invoke_monitor_meta_refresh($service, meta_refresh_account(), $now + 60);
+
+    assert_same_monitor(1, count($aliyun->getInstancesCalls), 'second call inside the interval must not hit the API');
+    assert_same_monitor(1, count($config->networkMetadataUpdates), 'second call inside the interval must not write');
+}
+
+test_meta_refresh_is_throttled_by_interval();
+
+function test_meta_refresh_can_be_disabled(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $config->settings['instance_meta_refresh_interval'] = '0';
+    $aliyun = new FakeMonitorAliyun();
+    $aliyun->instances = [['instanceId' => 'i-1', 'publicIp' => '8.208.77.147']];
+    $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    invoke_monitor_meta_refresh($service, meta_refresh_account(), 1774000000);
+
+    assert_same_monitor(0, count($aliyun->getInstancesCalls), 'interval 0 should disable the refresh');
+}
+
+test_meta_refresh_can_be_disabled();
+
+function test_meta_refresh_backs_off_on_failure(): void
+{
+    $db = new FakeMonitorDb();
+    $config = new FakeMonitorConfig();
+    $aliyun = new FakeMonitorAliyun();
+    $aliyun->getInstancesError = new \Exception('InvalidAccessKeyId.NotFound');
+    $service = new MonitorService($db, $config, $aliyun, new FakeMonitorNotification(), new FakeMonitorDdns());
+
+    $now = 1774000000;
+    invoke_monitor_meta_refresh($service, meta_refresh_account(), $now);
+    invoke_monitor_meta_refresh($service, meta_refresh_account(), $now + 60);
+
+    assert_same_monitor(1, count($aliyun->getInstancesCalls), 'failure must back off for one interval, not retry every round');
+    assert_same_monitor(0, count($config->networkMetadataUpdates), 'failure must not write metadata');
+    assert_same_monitor(1, count($db->logsOfType('warning')), 'failure should be logged once');
+    assert_contains_monitor('实例元数据刷新失败', $db->logsOfType('warning')[0], 'warning should be readable');
+}
+
+test_meta_refresh_backs_off_on_failure();
 
 echo "MonitorService tests passed\n";

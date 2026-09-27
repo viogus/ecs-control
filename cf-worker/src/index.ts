@@ -13,7 +13,7 @@ import { decrypt, encrypt, isEncrypted } from './crypto';
 import { buildPreview } from './ecs-create';
 import { importFromDocker } from './migration';
 import { renderHtml } from './frontend';
-import { syncAccountGroups, getGroupsFromSettings, mergeMaskedAccountGroupSecrets, encryptGroupSecrets } from './accounts';
+import { syncAccountGroups, getGroupsFromSettings, mergeMaskedAccountGroupSecrets, encryptGroupSecrets, refreshAllAccountsMetadata } from './accounts';
 import { sendEmail, sendWebhook, notifyPublicIpChanged } from './notification';
 import { VUE_SOURCE } from './vue-source';
 import type { MigrationExport } from './types';
@@ -590,6 +590,25 @@ export default {
       ctx.waitUntil((async () => {
         try { await syncDdns(env.DB, accounts, env.ENCRYPTION_KEY); }
         catch (e: any) { try { await addLog(env.DB, 'error', `DDNS cron failed: ${e.message}`); } catch {} }
+      })());
+    }
+
+    // 每 30 分钟对齐一次实例网络元数据:IP 若是在别处(另一个部署/控制台)改的,本库不会永久停在旧值,
+    // 否则 DDNS 会拿着陈旧 IP 与对方来回互改。设 instance_meta_refresh_interval=0 可关闭。
+    if (cron === '*/30 * * * *') {
+      ctx.waitUntil((async () => {
+        try {
+          if ((await getSetting(env.DB, 'instance_meta_refresh_interval', '1800')) === '0') return;
+          const decrypted: Account[] = [];
+          for (const acc of accounts) {
+            try { decrypted.push(await decryptAccount(acc) as Account); }
+            catch (e: any) { try { await addLog(env.DB, 'error', `Decrypt failed [${acc.remark || acc.instance_id}]: ${e.message}`); } catch {} }
+          }
+          await refreshAllAccountsMetadata(env.DB, env.ENCRYPTION_KEY, decrypted,
+            (type, msg) => addLog(env.DB, type, msg));
+        } catch (e: any) {
+          try { await addLog(env.DB, 'error', `Metadata refresh cron failed: ${e.message}`); } catch {}
+        }
       })());
     }
 
