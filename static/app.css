@@ -1152,39 +1152,12 @@ input[type="number"]::-webkit-inner-spin-button {
     color: var(--muted);
 }
 
-.address-copy-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.35rem;
+.summary-address {
     margin-top: 0.2rem;
-}
-
-.address-copy-text {
-    flex: 1 1 auto;
-    min-width: 0;
+    font-weight: 600;
     color: var(--text);
     word-break: break-all;
     user-select: all;
-    cursor: text;
-}
-
-.address-copy-button {
-    flex: 0 0 auto;
-    padding: 0.1rem 0.4rem;
-    border: 1px solid var(--line);
-    border-radius: 0.4rem;
-    background: transparent;
-    color: var(--muted);
-    font-size: 0.7rem;
-    line-height: 1.4;
-    cursor: pointer;
-    transition: all .15s ease;
-}
-
-.address-copy-button:hover {
-    color: var(--text);
-    border-color: var(--muted);
-    background: var(--panel);
 }
 
 .row-actions {
