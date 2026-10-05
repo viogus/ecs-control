@@ -1160,6 +1160,15 @@ input[type="number"]::-webkit-inner-spin-button {
     user-select: all;
 }
 
+.copyable-address {
+    cursor: pointer;
+}
+
+.copyable-address:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
 .row-actions {
     display: flex;
     justify-content: center;
