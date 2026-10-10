@@ -188,9 +188,16 @@ export async function runTrafficCheck(env: Env, account: Account, preloaded?: Re
 
   let failureAt = 0;
   if (traffic.success) {
-    // 恢复成功：清除失败与告警标记，下次中断可重新告警
-    await env.DB.prepare('DELETE FROM settings WHERE key IN (?, ?, ?)')
-      .bind(failureKey, notifiedKey, attemptKey).run();
+    // 恢复成功：清除失败与告警标记，下次中断可重新告警。
+    // D1 按写入行数计费，而命中 0 行的 DELETE 同样计一行；正常情况下这三个键都不存在，
+    // 所以先用本轮已预读的 settings 快照筛一遍，没有就一条语句也不发。
+    // 快照过期最多让标记多留一轮(60s)，且这些标记只用于告警去重，无副作用。
+    const staleKeys = [failureKey, notifiedKey, attemptKey]
+      .filter(k => (preloaded ? preloaded[k] !== undefined : true));
+    if (staleKeys.length > 0) {
+      await env.DB.prepare(`DELETE FROM settings WHERE key IN (${staleKeys.map(() => '?').join(', ')})`)
+        .bind(...staleKeys).run();
+    }
   } else {
     failureAt = parseInt((await getSetting(env.DB, failureKey, '0')) || '0', 10);
     if (!failureAt) {

@@ -2,7 +2,7 @@ import type { Account, Env, JwtPayload } from './types';
 import { verifyJwt, signJwt, verifyPassword, hashPassword, generateCsrfToken } from './auth';
 import {
   getAccounts, getSetting, getSettingPlain, getSettings, saveSetting, saveSettingsBulk,
-  getLogs, addLog, getAccountById,
+  getLogs, addLog, getAccountById, isHeartbeatDue,
 } from './db';
 import { runTrafficCheck } from './monitor';
 import { runScheduleCheck } from './schedules';
@@ -567,6 +567,11 @@ export default {
       // 节流刷新(默认 1800s,0 关闭),避免本库永久停在旧值、DDNS 每轮与对方互改。
       // 复用本分支已预读的 settings,不额外产生 D1 读;不新增 cron 触发(免费版账号级上限 5 个)。
       const metaInterval = parseInt(settings['instance_meta_refresh_interval'] ?? '1800', 10);
+      // 心跳日志节流:D1 按「写入行数」计费,每分钟给每个账号插一条 heartbeat 是最大单项
+      // (1 账号 = 1440 行/天,约占全部写入 85%)。默认 600s 落一条;<= 0 关闭;脏值回退默认。
+      // 有实际动作(Traffic/Schedule 有输出)时仍然立即落库,保证关键事件不丢。
+      const hbParsed = parseInt(settings['heartbeat_interval'] ?? '600', 10);
+      const heartbeatInterval = Number.isFinite(hbParsed) ? hbParsed : 600;
       for (const acc of accounts) {
         let decrypted: any;
         try { decrypted = await decryptAccount(acc); }
@@ -588,11 +593,14 @@ export default {
                 (type, msg) => addLog(env.DB, type, msg));
             }
 
-            await addLog(env.DB, 'heartbeat',
-              `[${acc.remark || acc.instance_id}] ${acc.instance_status} | ` +
-              `Traffic: ${trafficLogs.length ? trafficLogs.join(',') : 'OK'} | ` +
-              `Schedule: ${scheduleLogs.length ? scheduleLogs.join(',') : 'none'}`
-            );
+            const hasAction = trafficLogs.length > 0 || scheduleLogs.length > 0;
+            if (hasAction || isHeartbeatDue(heartbeatInterval)) {
+              await addLog(env.DB, 'heartbeat',
+                `[${acc.remark || acc.instance_id}] ${acc.instance_status} | ` +
+                `Traffic: ${trafficLogs.length ? trafficLogs.join(',') : 'OK'} | ` +
+                `Schedule: ${scheduleLogs.length ? scheduleLogs.join(',') : 'none'}`
+              );
+            }
           } catch (e: any) {
             try { await addLog(env.DB, 'error', `Cron check failed [${acc.remark || acc.instance_id}]: ${e.message}`); } catch {}
           }

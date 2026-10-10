@@ -236,6 +236,11 @@ label{font-size:13px;color:#86868b;display:block;margin-bottom:3px}
           </div>
         </div>
         <div class="form-group">
+          <label>心跳日志间隔 (秒)</label>
+          <input v-model.number="cfg.heartbeat_interval" type="number" min="0" step="60" style="width:140px">
+          <span style="font-size:12px;color:#86868b;margin-left:8px">D1 按写入行数计费：默认 600 秒记一条心跳日志，填 0 关闭（有流量/计划动作时仍会记录）</span>
+        </div>
+        <div class="form-group">
           <label>保活</label>
           <label class="toggle"><input type="checkbox" v-model="cfg.keep_alive" true-value="1" false-value="0"><span class="slider"></span></label>
           <span style="font-size:12px;color:#86868b;margin-left:8px">实例意外停机后自动启动</span>
@@ -321,6 +326,7 @@ createApp({
       traffic_threshold: '95', shutdown_mode: 'KeepCharging',
       cost_threshold_enabled: '0', cost_threshold: '0.48',
       keep_alive: '0',
+      heartbeat_interval: '600',
       notify_email_enabled: '1', notify_email: '', notify_host: '', notify_port: '465',
       notify_username: '', notify_password: '', notify_secure: 'ssl',
       notify_wh_enabled: '0', notify_wh_url: '', notify_wh_method: 'GET',

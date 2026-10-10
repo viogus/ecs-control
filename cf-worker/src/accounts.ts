@@ -248,19 +248,30 @@ export async function refreshAccountMetadata(
 
     const net = resolveNetworkMetadata(remote as unknown as Record<string, unknown>, account as unknown as Record<string, unknown>);
     const publicIp = String(remote.publicIp ?? '');
+    const bandwidth = Number(remote.internetMaxBandwidthOut ?? account.internet_max_bandwidth_out ?? 0);
+
+    // D1 按写入行数计费:「写回原值」也计一行。绝大多数轮次阿里云侧毫无变化,
+    // 所以这里先逐列比较,没有真变化就一次写库都不产生(此前每 1800s 白写一行)。
+    // 比较清单与下面 UPDATE 的列一一对应,将来加列不会漏比较。
     const changes: string[] = [];
-    if (publicIp !== account.public_ip) changes.push(`public_ip ${account.public_ip} -> ${publicIp}`);
-    if (net.eip_address !== account.eip_address) changes.push(`eip_address ${account.eip_address} -> ${net.eip_address}`);
-    if (net.public_ip_mode !== account.public_ip_mode) changes.push(`public_ip_mode ${account.public_ip_mode} -> ${net.public_ip_mode}`);
+    const diffText = (next: unknown, cur: unknown) => String(next ?? '') !== String(cur ?? '');
+    if (diffText(publicIp, account.public_ip)) changes.push(`public_ip ${account.public_ip ?? ''} -> ${publicIp}`);
+    if (diffText(net.eip_address, account.eip_address)) changes.push(`eip_address ${account.eip_address ?? ''} -> ${net.eip_address}`);
+    if (diffText(net.public_ip_mode, account.public_ip_mode)) changes.push(`public_ip_mode ${account.public_ip_mode ?? ''} -> ${net.public_ip_mode}`);
+    if (diffText(net.eip_allocation_id, account.eip_allocation_id)) changes.push(`eip_allocation_id ${account.eip_allocation_id ?? ''} -> ${net.eip_allocation_id}`);
+    if (Number(net.eip_managed ?? 0) !== Number(account.eip_managed ?? 0)) changes.push(`eip_managed ${account.eip_managed ?? 0} -> ${net.eip_managed ?? 0}`);
+    if (bandwidth !== Number(account.internet_max_bandwidth_out ?? 0)) changes.push(`internet_max_bandwidth_out ${account.internet_max_bandwidth_out ?? 0} -> ${bandwidth}`);
+
+    if (changes.length === 0) {
+      return true;
+    }
 
     await db.prepare(`UPDATE accounts SET public_ip=?, public_ip_mode=?, eip_allocation_id=?,
       eip_address=?, eip_managed=?, internet_max_bandwidth_out=? WHERE id=?`)
       .bind(publicIp, net.public_ip_mode, net.eip_allocation_id, net.eip_address, net.eip_managed,
-        Number(remote.internetMaxBandwidthOut ?? account.internet_max_bandwidth_out ?? 0), account.id).run();
+        bandwidth, account.id).run();
 
-    if (changes.length > 0) {
-      onLog?.('info', `实例网络元数据已刷新 [${label}]: ${changes.join('; ')}`);
-    }
+    onLog?.('info', `实例网络元数据已刷新 [${label}]: ${changes.join('; ')}`);
     return true;
   } catch (e: any) {
     onLog?.('warning', `实例元数据刷新失败 [${label}]: ${e?.message ?? e}`);

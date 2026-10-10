@@ -121,6 +121,27 @@ export function addLog(db: D1Database, type: string, message: string): Promise<D
     .bind(type, message, Math.floor(Date.now() / 1000)).run();
 }
 
+/**
+ * 心跳日志是否到期。
+ *
+ * 为什么需要节流：D1 按「写入行数」计费/限额，而每分钟 cron 都给每个账号插一行心跳，
+ * 即 1 账号 = 1440 行/天，是全部写入里最大的一项（约占 85%）。免费额度 10 万行/天时，
+ * 光心跳就能吃掉 ~70 个账号的配额。
+ *
+ * 判定方式刻意不用「上次心跳时间」这类状态：读一行 logs 再写一行 settings 反而更贵
+ * （而且 logs 上没有索引，读会全表扫描）。这里用 UTC 整分钟对齐，无状态、零额外读写：
+ * 每分钟 cron 只在该分钟的整点倍数落库。
+ *
+ * @param intervalSeconds 心跳周期（秒）。<= 0 关闭心跳日志；<= 60 保持「每分钟一条」的旧行为。
+ *                        周期按整分钟对齐，故实际粒度为分钟。
+ */
+export function isHeartbeatDue(intervalSeconds: number, nowMs: number = Date.now()): boolean {
+  if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) return false;
+  const minutes = Math.floor(intervalSeconds / 60);
+  if (minutes <= 1) return true;
+  return new Date(nowMs).getUTCMinutes() % minutes === 0;
+}
+
 export function getLogs(db: D1Database, types: string[], limit = 20): Promise<Record<string, unknown>[]> {
   const ph = types.map(() => '?').join(',');
   return db.prepare(`SELECT * FROM logs WHERE type IN (${ph}) ORDER BY id DESC LIMIT ?`)

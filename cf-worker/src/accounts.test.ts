@@ -64,17 +64,19 @@ describe('refreshAccountMetadata', () => {
     expect(update).toBeDefined();
     expect(update!.args[0]).toBe('8.208.77.147');
     expect(update!.args[5]).toBe(100);
-    expect(db.logs()).toEqual(['实例网络元数据已刷新 [uk]: public_ip 8.208.8.54 -> 8.208.77.147']);
+    expect(db.logs()).toHaveLength(1);
+    expect(db.logs()[0]).toContain('public_ip 8.208.8.54 -> 8.208.77.147');
   });
 
-  it('IP 没变 → 仍写库(幂等)但不记日志', async () => {
-    vi.mocked(getInstances).mockResolvedValue([remoteInstance({ publicIp: '8.208.8.54' })]);
+  it('公网 IP 与带宽都没变 → 一条语句都不发(D1 按写入行数计费)', async () => {
+    vi.mocked(getInstances).mockResolvedValue([remoteInstance({ publicIp: '8.208.8.54', internetMaxBandwidthOut: 1 })]);
     const db = new FakeDb();
 
-    await refreshAccountMetadata(db as unknown as D1Database, 'enc', account(),
-      (type, msg) => db.prepare('INSERT INTO logs (type, message, created_at) VALUES (?, ?, ?)').bind(type, msg, 0).run());
+    await expect(refreshAccountMetadata(db as unknown as D1Database, 'enc', account(),
+      (type, msg) => db.prepare('INSERT INTO logs (type, message, created_at) VALUES (?, ?, ?)').bind(type, msg, 0).run()))
+      .resolves.toBe(true);
 
-    expect(db.updates()).toHaveLength(1);
+    expect(db.updates()).toHaveLength(0);
     expect(db.logs()).toEqual([]);
   });
 
